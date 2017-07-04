@@ -46,6 +46,33 @@ namespace memory_tree_ns
         dst->in_use = src->in_use;
     }
 
+
+    void remove_repeat_features_in_f(features& f)
+    {
+        for (size_t i = 0; i < f.indicies.size(); i++){
+            if (f.values[i] != -FLT_MAX){
+                uint64_t loc = f.indicies[i];
+                for (size_t j = i+1; j < f.indicies.size(); j++){
+                    if (loc == f.indicies[j]){
+                        f.values[i] += f.values[j];
+                        f.values[j] = -FLT_MAX;
+                    }
+                }
+            }
+        }
+        for (size_t i = 0; i < f.indicies.size(); i++){
+            if (f.values[i] == -FLT_MAX)
+                f.values[i] = 0.0;
+        }
+    }
+    
+    void remove_repeat_features_in_ec(example& ec)
+    {
+        for (auto nc : ec.indices)
+            remove_repeat_features_in_f(ec.feature_space[nc]);
+    }
+
+    //f = f1 - f2
     void subtract_features(features& f1, features& f2, features& f)
     {//f1 and f2 are features under the same namespace
         f.deep_copy_from(f1);
@@ -58,7 +85,6 @@ namespace memory_tree_ns
             {
                 if (ind_f2 == f.indicies[pos]) //the feature index of f2 is also in f1, then we subtract:
                 {
-                    //cout<<pos<<endl;
                     f.values[pos] -= val_f2;
                     break;
                 }
@@ -67,6 +93,7 @@ namespace memory_tree_ns
                 f.push_back(0. - val_f2, ind_f2); 
         }
     }
+
 
     //ec1 - ec2
     void subtract_two_examples(example& ec1, example& ec2, example* subtracted_ec)
@@ -100,7 +127,7 @@ namespace memory_tree_ns
         subtracted_ec->total_sum_feat_sq = 0; 
         for (auto c : subtracted_ec->indices) //namespace index:
         {
-            cout<<"at "<<c<<endl;
+            //cout<<"at "<<c<<endl;
             int pos1 = 0;
             for (pos1 = 0; pos1 < ec1.indices.size(); pos1++){
                 if (c == ec1.indices[pos1])
@@ -141,6 +168,39 @@ namespace memory_tree_ns
         subtracted_ec->end_pass = ec1.end_pass;
         subtracted_ec->sorted = false;
         subtracted_ec->in_use = false;
+    }
+
+
+    ////Implement kronecker_product between two examples:
+    //kronecker_prod at feature level:
+    void diag_kronecker_prod_fs(features& f1, features& f2, float& total_sum_feat_sq)
+    {
+        for (size_t i1 = 0; i1 < f1.indicies.size(); i1++){
+            size_t i2 = 0;
+            for (i2 = 0; i2< f2.indicies.size(); i2++){
+                if (f1.indicies[i1] == f2.indicies[i2]){
+                    f1.values[i1] *= f2.values[i2];
+                    total_sum_feat_sq += pow(f1.values[i1],2);
+                    break;
+                }
+            }
+            if (i2 == f2.indicies.size()){ //f1's index does not appear in f2, namely value of the index in f2 is zero.
+                f1.values[i1] = 0.0;
+            }
+        }
+    }
+    //kronecker_prod at example level:
+    void diag_kronecker_product(example& ec1, example& ec2, example& ec)
+    {
+        //ec <= ec1 X ec2
+        copy_example_data(&ec, &ec1);
+        ec.total_sum_feat_sq = 0.0;
+        for(namespace_index c : ec.indices){
+            for(namespace_index c2 : ec2.indices){
+                if (c == c2)
+                    diag_kronecker_prod_fs(ec.feature_space[c], ec2.feature_space[c2], ec.total_sum_feat_sq);
+            }
+        }
     }
 
     ////////////////////////////end of helper/////////////////////////
@@ -264,65 +324,6 @@ namespace memory_tree_ns
             <<"tree size: "<<b.nodes.size()<<endl;
     }
 
-
-    //add quadratic features into a specific namespace 
-    void quadratize_feature(memory_tree& b, example& ec, bool diag)
-    {
-        vw* all = b.all;
-        uint64_t mask = all->weights.mask();
-        size_t ss = all->weights.stride_shift();
-
-        ec.indices.push_back(node_id_namespace); //add namespace.
-        uint64_t id = 0;
-        for (auto nc : ec.indices){ //only quadratize in the same namespace, we do not do it cross different namespace.
-            for (int i = 0; i < ec.feature_space[nc].indicies.size(); i++){
-                for (int j = i; j < ec.feature_space[nc].indicies.size(); j++){
-                    float val = ec.feature_space[nc].values[i] * ec.feature_space[nc].values[j];
-                    ec.feature_space[node_id_namespace].push_back(val, ((868771 * id) << ss) & mask);
-                    id ++;
-                    if (diag == true)
-                        break;
-                }
-            }
-        }
-    }
-
-    ////Implement kronecker_product between two examples:
-    //kronecker_prod at feature level:
-    void diag_kronecker_prod_fs(features& f1, features& f2, float& total_sum_feat_sq)
-    {
-        for (size_t i1 = 0; i1 < f1.indicies.size(); i1++){
-            size_t i2 = 0;
-            for (i2 = 0; i2< f2.indicies.size(); i2++){
-                if (f1.indicies[i1] == f2.indicies[i2]){
-                    f1.values[i1] *= f2.values[i2];
-                    total_sum_feat_sq += f1.values[i1];
-                    break;
-                }
-            }
-            if (i2 == f2.indicies.size()){ //f1's index does not appear in f2, namely value of the index in f2 is zero.
-                f1.values[i1] = 0.0;
-            }
-        }
-    }
-
-    //kronecker_prod at example level:
-    void diag_kronecker_product(example& ec1, example& ec2, example& ec)
-    {
-        //ec <= ec1 X ec2
-        copy_example_data(&ec, &ec1);
-        ec.total_sum_feat_sq = 0.0;
-        for(namespace_index c : ec.indices){
-            for(namespace_index c2 : ec2.indices){
-                if (c == c2)
-                    diag_kronecker_prod_fs(ec.feature_space[c], ec2.feature_space[c2], ec.total_sum_feat_sq);
-            }
-        }
-    }
-    //////////////////////////////////////////////////////////////
-
-
-
     //rout based on the prediction
     inline uint32_t descent(node& n, const float prediction)
     {
@@ -339,7 +340,6 @@ namespace memory_tree_ns
         }
     }
 
-    
     //train the node with id cn, using the statistics stored in the node to
     //formulate a binary classificaiton example.
     float train_node(memory_tree& b, base_learner& base, example& ec, const uint32_t cn)
@@ -367,70 +367,18 @@ namespace memory_tree_ns
         return save_binary_scalar;
     }
 
-    float linear_kernel(const flat_example* fec1, const flat_example* fec2)
-    { 
-        float dotprod = 0;
-        features& fs_1 = (features&)fec1->fs;
-        features& fs_2 = (features&)fec2->fs;
-        if (fs_2.indicies.size() == 0)
-            return 0.f;
-  
-        int numint = 0;
-        for (size_t idx1 = 0, idx2 = 0; idx1 < fs_1.size() && idx2 < fs_2.size() ; idx1++)
-        { 
-            uint64_t ec1pos = fs_1.indicies[idx1];
-            uint64_t ec2pos = fs_2.indicies[idx2];
-            //params.all->trace_message<<ec1pos<<" "<<ec2pos<<" "<<idx1<<" "<<idx2<<" "<<f->x<<" "<<ec2f->x<<endl;
-            if(ec1pos < ec2pos) continue;
-  
-            while(ec1pos > ec2pos && ++idx2 < fs_2.size())
-                ec2pos = fs_2.indicies[idx2];
-   
-            if(ec1pos == ec2pos)
-            { //params.all->trace_message<<ec1pos<<" "<<ec2pos<<" "<<idx1<<" "<<idx2<<" "<<f->x<<" "<<ec2f->x<<endl;
-                numint++;
-                dotprod += fs_1.values[idx1] * fs_2.values[idx2];
-                ++idx2;
-            }
-            }
-        return dotprod;
-    }
-
-    float normalized_dotprod(memory_tree& b, example& ec1, example& ec2)
-    {
-        flat_example* fec1 = flatten_sort_example(*(b.all), &ec1);
-        flat_example* fec2 = flatten_sort_example(*(b.all), &ec2);
-        float dot_prod = linear_kernel(fec1, fec2);
-        float normalized_dot_prod = dot_prod / (pow(fec1->total_sum_feat_sq,0.5) * pow(fec2->total_sum_feat_sq,0.5));
-        //float square_l2_dis = fec1->total_sum_feat_sq + fec2->total_sum_feat_sq - 2.*dot_prod;
-
-        free(fec1); //free the tempory constructed fec1.
-        free(fec2);
-        //return square_l2_dis;
-        return -normalized_dot_prod;
-    }
-
+    
     //turn a leaf into an internal node, and create two children
     //when the number of examples is too big
     void split_leaf(memory_tree& b, base_learner& base, const uint32_t cn)
     {
-        if(b.nodes[cn].internal != -1){
-            cout<<"####### ERROR: try to split a non-leaf node #########"<<endl;
-            return;
-        }
-        if(b.nodes[cn].depth >= b.max_depth){
-            cout<<"###### ERROR: try to split a leaf at the maximum depth #######"<<endl;
-            return;
-        }
-
            
         b.nodes[cn].internal = 1; //swith to internal node.
         uint32_t left_child = b.nodes[cn].left;
         b.nodes[left_child].internal = -1; //switch to leaf
-        b.valid_nodes_num++;
         uint32_t right_child = b.nodes[cn].right;
         b.nodes[right_child].internal = -1; //swith to leaf
-        b.valid_nodes_num++; 
+        b.valid_nodes_num+=2; 
 
         //rout the examples stored in the node to the left and right
         for(size_t ec_id = 0; ec_id < b.nodes[cn].examples_index.size(); ec_id++) //scan all examples stored in the cn
@@ -457,30 +405,32 @@ namespace memory_tree_ns
             b.examples[ec_pos]->pred.multiclass = save_multi_pred;
         }
         b.nodes[cn].examples_index.delete_v(); //empty the cn's example list
-        b.nodes[cn].nl = std::max(double(b.nodes[left_child].examples_index.size()), 0.1); //avoid to set nl to zero
-        b.nodes[cn].nr = std::max(double(b.nodes[right_child].examples_index.size()), 0.1); //avoid to set nr to zero
+        b.nodes[cn].nl = std::max(double(b.nodes[left_child].examples_index.size()), 0.01); //avoid to set nl to zero
+        b.nodes[cn].nr = std::max(double(b.nodes[right_child].examples_index.size()), 0.01); //avoid to set nr to zero
     }
     
-    //pick up the "closest" example in the leaf.
-    int32_t pick_nearest(memory_tree& b, base_learner& base, const uint32_t cn, example& ec)
+    //pick up the "closest" example in the leaf using the score function.
+    int64_t pick_nearest(memory_tree& b, base_learner& base, const uint32_t cn, example& ec)
     {
         if (b.nodes[cn].examples_index.size() > 0)
         {
-            float min_square_l2 = FLT_MAX;
-            int32_t min_pos = -1;
+            float max_score = -FLT_MAX;
+            int64_t max_pos = -1;
 
             for(int i = 0; i < b.nodes[cn].examples_index.size(); i++)
             {
                 uint32_t loc = b.nodes[cn].examples_index[i];
-                float dis_i = normalized_dotprod(b, ec, *b.examples[loc]);
-                
-                if(dis_i <= min_square_l2)
-                {
-                    min_square_l2 = dis_i;
-                    min_pos = (int32_t)loc;
+                example* kprod_ec = &calloc_or_throw<example>();
+                diag_kronecker_product(ec, *b.examples[loc], *kprod_ec);
+                base.predict(*kprod_ec, b.max_routers);
+                float score = kprod_ec->pred.scalar;
+                if (score > max_score){
+                    max_score = score;
+                    max_pos = (int64_t)loc;
                 }
+                free(kprod_ec);
             }
-            return min_pos;
+            return max_pos;
         }
         else
             return -1;
@@ -516,6 +466,7 @@ namespace memory_tree_ns
             }
             free(kprod_ec);    
         }
+        //reduction to binary classfication with label = +1:
         if ((correct_min_loc != -1) && (incorrect_max_loc != -1)){ //in this leaf, we have at least one example that has the same label as ec
             example* prod_cor = &calloc_or_throw<example>();
             example* prod_incor= &calloc_or_throw<example>();
@@ -524,7 +475,7 @@ namespace memory_tree_ns
             diag_kronecker_product(ec, *b.examples[incorrect_max_loc], *prod_incor);
             subtract_two_examples(*prod_cor, *prod_incor, sub_ec);
             sub_ec->l.simple = {1., 1.0, 0.};  //labels are always +1. 
-            base.predict(*sub_ec, b.max_routers);  
+            base.learn(*sub_ec, b.max_routers);  
             free(prod_cor);
             free(prod_incor);
             free(sub_ec);
@@ -567,27 +518,20 @@ namespace memory_tree_ns
             //cout<<"At iter "<<b.iter<<", we have total "<<b.num_ecs<<" examples, and total "<<b.labels.size()<<" unique labels, the ratio is "<<b.labels.size()*1./b.num_ecs<<endl;
         }
  
-        example& new_ec = calloc_or_throw<example>();
-        copy_example_data(&new_ec, &ec);
-        b.examples.push_back(&new_ec);
+        example* new_ec = &calloc_or_throw<example>();
+        copy_example_data(new_ec, &ec);
+        remove_repeat_features_in_ec(*new_ec);
+        b.examples.push_back(new_ec);
         b.num_ecs++; 
+        
 
-        if (b.num_ecs == 10){
-            example& prod_ec = calloc_or_throw<example>();
-            diag_kronecker_product(*b.examples[8], *b.examples[9], prod_ec);
-
-            cout<<"ab"<<endl;
-        }
-
-
-        /*
-        predict(b, base, ec);   //prediction is stored in ec.pred.multiclass.
+        predict(b, base, *b.examples[b.num_ecs - 1]);   //prediction is stored in ec.pred.multiclass.
             
         uint32_t cn = 0; //start from the root.
         while(b.nodes[cn].internal == 1) //if it's internal node:
         {   
             //predict and train the node at cn.
-            float router_pred = train_node(b, base, ec, cn); 
+            float router_pred = train_node(b, base, *b.examples[b.num_ecs - 1], cn); 
             uint32_t newcn = descent(b.nodes[cn], router_pred); //updated nr or nl
             cn = newcn; 
         }
@@ -596,16 +540,16 @@ namespace memory_tree_ns
         {
             //insert the example's location (size - 1) to the leaf node:
             b.nodes[cn].examples_index.push_back(b.num_ecs - 1);
-            float leaf_pred = train_node(b, base, ec, cn); //tain the leaf as well.
+            float leaf_pred = train_node(b, base, *b.examples[b.num_ecs - 1], cn); //tain the leaf as well.
             descent(b.nodes[cn], leaf_pred); //this is a faked descent, the purpose is only to update nl and nr of cn
 
             //if the number of examples exceeds the max_leaf_examples, and it hasn't reached the depth limit yet, we split:
             if((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes[cn].depth < b.max_depth))
                 split_leaf(b, base, cn); 
+            else
+                learn_similarity_at_leaf(b, base, cn, *b.examples[b.num_ecs - 1]);  //learn similarity function at leaf
             
-            //learn similarity function at leaf
-            learn_similarity_at_leaf(b, base, cn, ec);
-        }*/
+        }
 
     }
 
@@ -682,3 +626,79 @@ int main(void)
     //init_tree(tree);
     //std::cout<<tree.nodes.size()<<std::endl;
 }*/
+
+
+/*
+if (b.num_ecs == 10){
+            example* prod_cor = &calloc_or_throw<example>();
+            example* prod_incor = &calloc_or_throw<example>();
+            example* sub_ec = &calloc_or_throw<example>();
+            diag_kronecker_product(*b.examples[b.examples.size()-1], *b.examples[0], *prod_cor);
+            diag_kronecker_product(*b.examples[b.examples.size()-1], *b.examples[1], *prod_incor);
+            subtract_two_examples(*prod_cor, *prod_incor, sub_ec);
+
+            cout<<"ab"<<endl;
+        }
+
+
+    void test_substract_features()
+    {
+        features& f1 = calloc_or_throw<features>();
+        features& f2 = calloc_or_throw<features>();
+        features& f = calloc_or_throw<features>();
+        f1.push_back(1, 1);
+        f1.push_back(1, 2);
+        f2.push_back(1, 2);
+        f2.push_back(0., 3);
+
+        subtract_features(f1,f2,f);
+        for (int i = 0 ; i < f.values.size(); i++)
+            cout<<f.values[i]<<endl;
+
+    }
+
+
+float linear_kernel(const flat_example* fec1, const flat_example* fec2)
+    { 
+        float dotprod = 0;
+        features& fs_1 = (features&)fec1->fs;
+        features& fs_2 = (features&)fec2->fs;
+        if (fs_2.indicies.size() == 0)
+            return 0.f;
+  
+        int numint = 0;
+        for (size_t idx1 = 0, idx2 = 0; idx1 < fs_1.size() && idx2 < fs_2.size() ; idx1++)
+        { 
+            uint64_t ec1pos = fs_1.indicies[idx1];
+            uint64_t ec2pos = fs_2.indicies[idx2];
+            //params.all->trace_message<<ec1pos<<" "<<ec2pos<<" "<<idx1<<" "<<idx2<<" "<<f->x<<" "<<ec2f->x<<endl;
+            if(ec1pos < ec2pos) continue;
+  
+            while(ec1pos > ec2pos && ++idx2 < fs_2.size())
+                ec2pos = fs_2.indicies[idx2];
+   
+            if(ec1pos == ec2pos)
+            { //params.all->trace_message<<ec1pos<<" "<<ec2pos<<" "<<idx1<<" "<<idx2<<" "<<f->x<<" "<<ec2f->x<<endl;
+                numint++;
+                dotprod += fs_1.values[idx1] * fs_2.values[idx2];
+                ++idx2;
+            }
+            }
+        return dotprod;
+    }
+
+    float normalized_dotprod(memory_tree& b, example& ec1, example& ec2)
+    {
+        flat_example* fec1 = flatten_sort_example(*(b.all), &ec1);
+        flat_example* fec2 = flatten_sort_example(*(b.all), &ec2);
+        float dot_prod = linear_kernel(fec1, fec2);
+        float normalized_dot_prod = dot_prod / (pow(fec1->total_sum_feat_sq,0.5) * pow(fec2->total_sum_feat_sq,0.5));
+        //float square_l2_dis = fec1->total_sum_feat_sq + fec2->total_sum_feat_sq - 2.*dot_prod;
+
+        free(fec1); //free the tempory constructed fec1.
+        free(fec2);
+        //return square_l2_dis;
+        return -normalized_dot_prod;
+    }
+
+*/
