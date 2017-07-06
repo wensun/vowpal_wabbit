@@ -2,7 +2,9 @@
 #include <cmath>
 #include <cstdio>
 #include <float.h>
+#include <time.h>
 #include <sstream>
+#include <random>
 
 #include "reductions.h"
 #include "rand48.h"
@@ -16,19 +18,40 @@ namespace memory_tree_ns
 {
     ///////////////////////Helper//////////////////////////////
     //////////////////////////////////////////////////////////
-    void copy_example_data(example* dst, example* src)
+    template<typename T> 
+    void pop_at_index(v_array<T>& array, uint32_t index)
+    {
+        if (index >= array.size()){
+            cout<<"ERROR: index is larger than the size"<<endl;
+            return;
+        }
+        if (index == array.size() - 1){
+            array.pop();
+            return;
+        }
+        for (size_t i = index+1; i < array.size(); i++){
+            array[i-1] = array[i];
+        }
+        array.pop();
+        return;
+    }
+
+    void copy_example_data(example* dst, example* src, bool no_feat = false)
     { 
         dst->l = src->l;
         dst->l.multi.label = src->l.multi.label;
 
         copy_array(dst->tag, src->tag);
         dst->example_counter = src->example_counter;
-        copy_array(dst->indices, src->indices);
-        for (namespace_index c : src->indices)
-            dst->feature_space[c].deep_copy_from(src->feature_space[c]);
+
+        if (no_feat == false){
+            copy_array(dst->indices, src->indices);
+            for (namespace_index c : src->indices)
+                dst->feature_space[c].deep_copy_from(src->feature_space[c]);
             dst->ft_offset = src->ft_offset;
 
-        dst->num_features = src->num_features;
+            dst->num_features = src->num_features;
+        }
         dst->partial_prediction = src->partial_prediction;
         if (src->passthrough == nullptr) dst->passthrough = nullptr;
         else
@@ -203,6 +226,62 @@ namespace memory_tree_ns
         }
     }
 
+    void kronecker_product_f(features& f1, features& f2, features& f, float& total_sq, size_t& num_feat, uint64_t mask, size_t ss)
+    {
+        for (size_t i = 0; i < f1.indicies.size(); i++){
+            size_t j = 0;
+            for (j = 0; j < f2.indicies.size(); j++){
+                if (f1.indicies[i] == f2.indicies[j]){    // != 0
+                    f.push_back(f1.values[i]*f2.values[j], ((f1.indicies[i]+f2.indicies[j])<<ss) & mask);
+                    total_sq += pow(f1.values[i]*f2.values[j], 2);
+                    num_feat ++;
+                    break;
+                }
+            }
+        }
+    }
+
+    //void kronecker_product(example& ec1, example& ec2, example& ec, uint64_t mask, size_t ss)
+    //{
+        //copy_example_data(&ec, &ec1);
+    //    ec.indices.push_back(node_id_namespace);
+    //    ec.total_sum_feat_sq = 0.0;
+    //    for (namespace_index c1 : ec1.indices){
+    //        for (namespace_index c2 : ec2.indices){
+    //            if (c1 == c2)
+    //                kronecker_product_f(ec1.feature_space[c1], ec2.feature_space[c2], ec.feature_space[node_id_namespace], ec.total_sum_feat_sq, ec.num_features, mask, ss);
+    //        }
+    //    }
+    //}
+
+    void kronecker_product(example& ec1, example& ec2, example& ec)
+    {
+        copy_example_data(&ec, &ec1, true);
+        ec.indices.delete_v();
+        ec.indices.push_back(node_id_namespace);
+        ec.indices.push_back(dictionary_namespace);
+        ec.num_features = 0;
+        ec.total_sum_feat_sq = 0.0;
+
+        //to do: figure out how to set the indicies correctly (different namespaces may have same index)
+        for (auto nc : ec1.indices)
+        {
+            for (int i = 0; i < ec1.feature_space[nc].indicies.size(); i++){
+                ec.feature_space[node_id_namespace].push_back(ec1.feature_space[nc].values[i], ec1.feature_space[nc].indicies[i]);
+                ec.num_features++;
+                ec.total_sum_feat_sq+=pow(ec1.feature_space[nc].values[i],2);
+            }
+        }
+        for (auto nc : ec2.indices)
+        {
+            for (int i = 0; i < ec2.feature_space[nc].indicies.size(); i++){
+                ec.feature_space[dictionary_namespace].push_back(ec2.feature_space[nc].values[i], ec2.feature_space[nc].indicies[i]);
+                ec.num_features++;
+                ec.total_sum_feat_sq+=pow(ec2.feature_space[nc].values[i],2);
+            }
+        }
+    }
+
     ////////////////////////////end of helper/////////////////////////
     //////////////////////////////////////////////////////////////////
 
@@ -246,7 +325,7 @@ namespace memory_tree_ns
     {
         vw* all;
 
-        std::vector<int> labels;
+        //std::vector<int> labels;
         size_t unique_labels;
 
         //std::vector<node> nodes;
@@ -339,6 +418,32 @@ namespace memory_tree_ns
             return n.right; 
         }
     }
+
+    //return the id of the example and the leaf id (stored in cn)
+    inline int random_sample_example(memory_tree& b, uint32_t& cn)
+    {
+        int iter = 0;
+        for (iter = 0; iter < 100; iter++){
+            cn = 0; //always start from the root:
+            while (b.nodes[cn].internal == 1)
+            {
+                float pred = ((double)rand()/(double)RAND_MAX) < (b.nodes[cn].nl*1./(b.nodes[cn].nr+b.nodes[cn].nl)) ? -1.f : 1.f;
+                if (pred < 0)
+                    cn = b.nodes[cn].left; 
+                else
+                    cn = b.nodes[cn].right;
+            }
+            if (b.nodes[cn].examples_index.size() > 0)  //find a leaf who has non-zero many examples
+                break;
+        }
+        if (iter == 100)
+            cout<<"ERROR: keep getting to leafs with no examples....."<<endl;
+            return 0;
+
+        int loc_at_leaf = rand() % b.nodes[cn].examples_index.size(); //[0, size-1]
+        return loc_at_leaf;
+    }
+
 
     //train the node with id cn, using the statistics stored in the node to
     //formulate a binary classificaiton example.
@@ -436,52 +541,22 @@ namespace memory_tree_ns
             return -1;
     }
 
-    //use the passive aggressive method to reduce a ranking problem to a binary problem [see the passive aggressive paper,sec 7]
     void learn_similarity_at_leaf(memory_tree& b, base_learner& base, const uint32_t cn, example& ec)
     {
-        int correct_min_loc = -1;
-        int incorrect_max_loc = -1;
-        float correct_min_score = FLT_MAX;
-        float incorrect_max_score = -FLT_MAX;
-
         for (uint32_t loc : b.nodes[cn].examples_index)
         {
+            example* ec_loc = b.examples[loc];
             example* kprod_ec = &calloc_or_throw<example>();
-            diag_kronecker_product(ec, *b.examples[loc], *kprod_ec);
-            base.predict(*kprod_ec, b.max_routers);
-            float score = kprod_ec->pred.scalar;
+            diag_kronecker_product(ec, *ec_loc, *kprod_ec);
+            if (ec.l.multi.label == b.examples[loc]->l.multi.label) //reward = 1:    
+                kprod_ec->l.simple = {1., 1., 0.};
+            else
+                kprod_ec->l.simple = {-1., 1., 0.}; //reward = 0:
+            base.learn(*kprod_ec, b.max_routers);
 
-            if (ec.l.multi.label == b.examples[loc]->l.multi.label) //correct example:
-            {
-                if (score < correct_min_score){
-                    correct_min_score = score;
-                    correct_min_loc = loc;
-                }
-            }
-            else{ //incorrect example
-                if (score > incorrect_max_score){
-                    incorrect_max_score = score;
-                    incorrect_max_loc = loc;
-                }
-            }
-            free(kprod_ec);    
-        }
-        //reduction to binary classfication with label = +1:
-        if ((correct_min_loc != -1) && (incorrect_max_loc != -1)){ //in this leaf, we have at least one example that has the same label as ec
-            example* prod_cor = &calloc_or_throw<example>();
-            example* prod_incor= &calloc_or_throw<example>();
-            example* sub_ec = &calloc_or_throw<example>();
-            diag_kronecker_product(ec, *b.examples[correct_min_loc], *prod_cor);
-            diag_kronecker_product(ec, *b.examples[incorrect_max_loc], *prod_incor);
-            subtract_two_examples(*prod_cor, *prod_incor, sub_ec);
-            sub_ec->l.simple = {1., 1.0, 0.};  //labels are always +1. 
-            base.learn(*sub_ec, b.max_routers);  
-            free(prod_cor);
-            free(prod_incor);
-            free(sub_ec);
+            free(kprod_ec);
         }
     }
-
 
     void predict(memory_tree& b, base_learner& base, example& ec)
     {
@@ -508,49 +583,79 @@ namespace memory_tree_ns
         }
     }
 
-    //learn: descent the example from the root while generating binary training
-    //example for each node, including the leaf, and store the example at the leaf.
-    void learn(memory_tree& b, base_learner& base, example& ec)
+    //node here the ec is already stored in the b.examples, the task here is to rout it to the leaf, 
+    //and insert the ec_array_index to the leaf.
+    void insert_example(memory_tree& b, base_learner& base, const uint32_t& ec_array_index)
     {
-        b.iter++;
-        if(b.iter % 1000 == 0){
-            cout<<"At iter "<<b.iter<<", the prediction error "<<b.num_mistakes*1./(b.iter)<<endl;
-            //cout<<"At iter "<<b.iter<<", we have total "<<b.num_ecs<<" examples, and total "<<b.labels.size()<<" unique labels, the ratio is "<<b.labels.size()*1./b.num_ecs<<endl;
-        }
- 
-        example* new_ec = &calloc_or_throw<example>();
-        copy_example_data(new_ec, &ec);
-        remove_repeat_features_in_ec(*new_ec);
-        b.examples.push_back(new_ec);
-        b.num_ecs++; 
-        
-
-        predict(b, base, *b.examples[b.num_ecs - 1]);   //prediction is stored in ec.pred.multiclass.
-            
         uint32_t cn = 0; //start from the root.
         while(b.nodes[cn].internal == 1) //if it's internal node:
         {   
             //predict and train the node at cn.
-            float router_pred = train_node(b, base, *b.examples[b.num_ecs - 1], cn); 
+            float router_pred = train_node(b, base, *b.examples[ec_array_index], cn); 
             uint32_t newcn = descent(b.nodes[cn], router_pred); //updated nr or nl
             cn = newcn; 
         }
-
         if(b.nodes[cn].internal == -1) //get to leaf:
         {
             //insert the example's location (size - 1) to the leaf node:
-            b.nodes[cn].examples_index.push_back(b.num_ecs - 1);
-            float leaf_pred = train_node(b, base, *b.examples[b.num_ecs - 1], cn); //tain the leaf as well.
+            b.nodes[cn].examples_index.push_back(ec_array_index);
+            float leaf_pred = train_node(b, base, *b.examples[ec_array_index], cn); //tain the leaf as well.
             descent(b.nodes[cn], leaf_pred); //this is a faked descent, the purpose is only to update nl and nr of cn
 
             //if the number of examples exceeds the max_leaf_examples, and it hasn't reached the depth limit yet, we split:
             if((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes[cn].depth < b.max_depth))
                 split_leaf(b, base, cn); 
             else
-                learn_similarity_at_leaf(b, base, cn, *b.examples[b.num_ecs - 1]);  //learn similarity function at leaf
+                learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]);  //learn similarity function at leaf
+        }
+    }
+    void experience_replay(memory_tree& b, base_learner& base)
+    {
+        uint32_t cn = 0; //start from root, randomly descent down! 
+        int loc_at_leaf = random_sample_example(b, cn);
+        uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf]; //ec_id is the postion of the sampled example in b.examples. 
+
+        //pop the sampled example, trace back to the root
+        pop_at_index(b.nodes[cn].examples_index, loc_at_leaf); //delete ec_id from examples_index
+        while (cn != 0) //trace back to the root
+        {
+            uint32_t parent = b.nodes[cn].parent;
+            if (b.nodes[parent].left == cn)
+                b.nodes[parent].nl--;
+            else if (b.nodes[parent].right == cn)
+                b.nodes[parent].nr--;
             
+            cn = parent;
+        }
+        //re-insert:note that we do not have to 
+        //re-store the example into b.examples, as it's alreay there
+        insert_example(b, base, ec_id); 
+    }
+
+
+    //learn: descent the example from the root while generating binary training
+    //example for each node, including the leaf, and store the example at the leaf.
+    void learn(memory_tree& b, base_learner& base, example& ec)
+    {
+        
+        b.iter++;
+        if(b.iter % 1000 == 0){
+            cout<<"At iter "<<b.iter<<", the prediction error "<<b.num_mistakes*1./(b.iter)<<endl;
+            //cout<<"At iter "<<b.iter<<", we have total "<<b.num_ecs<<" examples, and total "<<b.labels.size()<<" unique labels, the ratio is "<<b.labels.size()*1./b.num_ecs<<endl;
         }
 
+        example* new_ec = &calloc_or_throw<example>();
+        copy_example_data(new_ec, &ec);
+        remove_repeat_features_in_ec(*new_ec);
+        b.examples.push_back(new_ec);
+        b.num_ecs++; 
+        
+        predict(b, base, *b.examples[b.num_ecs - 1]);   //prediction is stored in ec.pred.multiclass.
+
+        insert_example(b, base, b.num_ecs-1);
+
+        if ((b.iter % 100) == 0)
+            experience_replay(b, base);
     }
 
 
@@ -604,7 +709,7 @@ base_learner* memory_tree_setup(vw& all)
                 all.p, 
                 tree.max_routers + 1);
     
-
+    srand(time(0));
     l.set_finish(finish);
 
     return make_base (l);
@@ -700,5 +805,8 @@ float linear_kernel(const flat_example* fec1, const flat_example* fec2)
         //return square_l2_dis;
         return -normalized_dot_prod;
     }
+
+
+
 
 */
