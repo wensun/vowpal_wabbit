@@ -258,8 +258,8 @@ namespace memory_tree_ns
     {
         copy_example_data(&ec, &ec1, true);
         ec.indices.delete_v();
-        ec.indices.push_back(node_id_namespace);
-        ec.indices.push_back(dictionary_namespace);
+        ec.indices.push_back(conditioning_namespace); //134, x86
+        ec.indices.push_back(dictionary_namespace); //135 x87
         ec.num_features = 0;
         ec.total_sum_feat_sq = 0.0;
 
@@ -339,6 +339,9 @@ namespace memory_tree_ns
         float alpha; //for cpt type of update.
         size_t valid_nodes_num;
         int iter;
+
+        bool path_id_feat;
+
         
         uint32_t num_mistakes;
         uint32_t num_ecs;
@@ -356,6 +359,7 @@ namespace memory_tree_ns
             num_ecs = 0;
             test_mistakes = 0;
             num_test_ecs = 0;
+            path_id_feat = false;
         }
     };
 
@@ -440,7 +444,7 @@ namespace memory_tree_ns
             cout<<"ERROR: keep getting to leafs with no examples....."<<endl;
             return 0;
 
-        int loc_at_leaf = rand() % b.nodes[cn].examples_index.size(); //[0, size-1]
+        int loc_at_leaf = rand() % b.nodes[cn].examples_index.size(); //uniformly from [0, size-1]
         return loc_at_leaf;
     }
 
@@ -514,6 +518,24 @@ namespace memory_tree_ns
         b.nodes[cn].nr = std::max(double(b.nodes[right_child].examples_index.size()), 0.01); //avoid to set nr to zero
     }
     
+    //add path feature:
+    void add_node_id_feature (memory_tree& b, uint32_t cn, example& ec)
+    {
+        vw* all = b.all;
+        uint64_t mask = all->weights.mask();
+        size_t ss = all->weights.stride_shift();
+
+        ec.indices.push_back (node_id_namespace);
+        features& fs = ec.feature_space[node_id_namespace];
+
+        while (cn > 0)
+        { 
+            fs.push_back (1., ((868771 * cn) << ss) & mask);
+            cn = b.nodes[cn].parent;
+        }
+    }
+
+
     //pick up the "closest" example in the leaf using the score function.
     int64_t pick_nearest(memory_tree& b, base_learner& base, const uint32_t cn, example& ec)
     {
@@ -527,6 +549,10 @@ namespace memory_tree_ns
                 uint32_t loc = b.nodes[cn].examples_index[i];
                 example* kprod_ec = &calloc_or_throw<example>();
                 diag_kronecker_product(ec, *b.examples[loc], *kprod_ec);
+
+                if (b.path_id_feat == true)
+                    add_node_id_feature(b, cn, *kprod_ec);
+
                 base.predict(*kprod_ec, b.max_routers);
                 float score = kprod_ec->pred.scalar;
                 if (score > max_score){
@@ -552,8 +578,11 @@ namespace memory_tree_ns
                 kprod_ec->l.simple = {1., 1., 0.};
             else
                 kprod_ec->l.simple = {-1., 1., 0.}; //reward = 0:
+            
+            if (b.path_id_feat == true)
+                add_node_id_feature(b, cn, *kprod_ec);
+            
             base.learn(*kprod_ec, b.max_routers);
-
             free(kprod_ec);
         }
     }
@@ -654,8 +683,9 @@ namespace memory_tree_ns
 
         insert_example(b, base, b.num_ecs-1);
 
-        if ((b.iter % 100) == 0)
+        if ((b.iter % 2) == 0){
             experience_replay(b, base);
+       }
     }
 
 
