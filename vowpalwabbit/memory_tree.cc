@@ -256,7 +256,7 @@ namespace memory_tree_ns
 
     void kronecker_product(example& ec1, example& ec2, example& ec)
     {
-        copy_example_data(&ec, &ec1, true);
+        copy_example_data(&ec, &ec1, true); 
         ec.indices.delete_v();
         ec.indices.push_back(conditioning_namespace); //134, x86
         ec.indices.push_back(dictionary_namespace); //135 x87
@@ -266,15 +266,15 @@ namespace memory_tree_ns
         //to do: figure out how to set the indicies correctly (different namespaces may have same index)
         for (auto nc : ec1.indices)
         {
-            for (int i = 0; i < ec1.feature_space[nc].indicies.size(); i++){
-                ec.feature_space[node_id_namespace].push_back(ec1.feature_space[nc].values[i], ec1.feature_space[nc].indicies[i]);
+            for (size_t i = 0; i < ec1.feature_space[nc].indicies.size(); i++){
+                ec.feature_space[conditioning_namespace].push_back(ec1.feature_space[nc].values[i], ec1.feature_space[nc].indicies[i]);
                 ec.num_features++;
                 ec.total_sum_feat_sq+=pow(ec1.feature_space[nc].values[i],2);
             }
         }
         for (auto nc : ec2.indices)
         {
-            for (int i = 0; i < ec2.feature_space[nc].indicies.size(); i++){
+            for (size_t i = 0; i < ec2.feature_space[nc].indicies.size(); i++){
                 ec.feature_space[dictionary_namespace].push_back(ec2.feature_space[nc].values[i], ec2.feature_space[nc].indicies[i]);
                 ec.num_features++;
                 ec.total_sum_feat_sq+=pow(ec2.feature_space[nc].values[i],2);
@@ -314,8 +314,8 @@ namespace memory_tree_ns
             base_router = 0;
             left = 0;
             right = 0;
-            nl = 0.1; //initilze to 1, as we need to do nl/nr.
-            nr = 0.1; 
+            nl = 0.01; //initilze to 1, as we need to do nl/nr.
+            nr = 0.01; 
             examples_index = {};
         }
     };
@@ -325,13 +325,8 @@ namespace memory_tree_ns
     {
         vw* all;
 
-        //std::vector<int> labels;
-        size_t unique_labels;
-
-        //std::vector<node> nodes;
         v_array<node> nodes;  //array of nodes.
         v_array<example*> examples; //array of example points
-        //v_array<flat_example*> flat_examples;
         
         size_t max_leaf_examples; 
         size_t max_depth;
@@ -342,7 +337,6 @@ namespace memory_tree_ns
 
         bool path_id_feat;
 
-        
         uint32_t num_mistakes;
         uint32_t num_ecs;
         uint32_t num_test_ecs;
@@ -357,7 +351,6 @@ namespace memory_tree_ns
             iter = 0;
             num_mistakes = 0;
             num_ecs = 0;
-            test_mistakes = 0;
             num_test_ecs = 0;
             path_id_feat = false;
         }
@@ -424,27 +417,24 @@ namespace memory_tree_ns
     }
 
     //return the id of the example and the leaf id (stored in cn)
-    inline int random_sample_example(memory_tree& b, uint32_t& cn)
+    inline int random_sample_example_pop(memory_tree& b, uint32_t& cn)
     {
-        int iter = 0;
-        for (iter = 0; iter < 100; iter++){
-            cn = 0; //always start from the root:
-            while (b.nodes[cn].internal == 1)
-            {
-                float pred = ((double)rand()/(double)RAND_MAX) < (b.nodes[cn].nl*1./(b.nodes[cn].nr+b.nodes[cn].nl)) ? -1.f : 1.f;
-                if (pred < 0)
-                    cn = b.nodes[cn].left; 
-                else
-                    cn = b.nodes[cn].right;
+        cn = 0; //always start from the root:
+        while (b.nodes[cn].internal == 1)
+        {
+            float pred = merand48(b.all->random_state) < (b.nodes[cn].nl*1./(b.nodes[cn].nr+b.nodes[cn].nl)) ? -1.f : 1.f;
+            if (pred < 0){
+                b.nodes[cn].nl--;
+                cn = b.nodes[cn].left; 
             }
-            if (b.nodes[cn].examples_index.size() > 0)  //find a leaf who has non-zero many examples
-                break;
+            else{
+                b.nodes[cn].nr--;
+                cn = b.nodes[cn].right;
+            }
         }
-        if (iter == 100)
-            cout<<"ERROR: keep getting to leafs with no examples....."<<endl;
-            return 0;
 
-        int loc_at_leaf = rand() % b.nodes[cn].examples_index.size(); //uniformly from [0, size-1]
+        int loc_at_leaf = int(merand48(b.all->random_state)*b.nodes[cn].examples_index.size());
+        pop_at_index(b.nodes[cn].examples_index, loc_at_leaf); 
         return loc_at_leaf;
     }
 
@@ -624,6 +614,7 @@ namespace memory_tree_ns
             uint32_t newcn = descent(b.nodes[cn], router_pred); //updated nr or nl
             cn = newcn; 
         }
+
         if(b.nodes[cn].internal == -1) //get to leaf:
         {
             //insert the example's location (size - 1) to the leaf node:
@@ -638,26 +629,14 @@ namespace memory_tree_ns
                 learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]);  //learn similarity function at leaf
         }
     }
+
     void experience_replay(memory_tree& b, base_learner& base)
     {
         uint32_t cn = 0; //start from root, randomly descent down! 
-        int loc_at_leaf = random_sample_example(b, cn);
+        int loc_at_leaf = random_sample_example_pop(b, cn);
         uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf]; //ec_id is the postion of the sampled example in b.examples. 
-
-        //pop the sampled example, trace back to the root
-        pop_at_index(b.nodes[cn].examples_index, loc_at_leaf); //delete ec_id from examples_index
-        while (cn != 0) //trace back to the root
-        {
-            uint32_t parent = b.nodes[cn].parent;
-            if (b.nodes[parent].left == cn)
-                b.nodes[parent].nl--;
-            else if (b.nodes[parent].right == cn)
-                b.nodes[parent].nr--;
-            
-            cn = parent;
-        }
         //re-insert:note that we do not have to 
-        //re-store the example into b.examples, as it's alreay there
+        //restore the example into b.examples, as it's alreay there
         insert_example(b, base, ec_id); 
     }
 
@@ -672,7 +651,6 @@ namespace memory_tree_ns
             cout<<"At iter "<<b.iter<<", the prediction error "<<b.num_mistakes*1./(b.iter)<<endl;
             //cout<<"At iter "<<b.iter<<", we have total "<<b.num_ecs<<" examples, and total "<<b.labels.size()<<" unique labels, the ratio is "<<b.labels.size()*1./b.num_ecs<<endl;
         }
-
         example* new_ec = &calloc_or_throw<example>();
         copy_example_data(new_ec, &ec);
         remove_repeat_features_in_ec(*new_ec);
@@ -683,9 +661,8 @@ namespace memory_tree_ns
 
         insert_example(b, base, b.num_ecs-1);
 
-        if ((b.iter % 2) == 0){
-            experience_replay(b, base);
-       }
+        if (b.iter % 2 == 0)
+            experience_replay(b, base);        
     }
 
 
@@ -699,7 +676,139 @@ namespace memory_tree_ns
         b.examples.delete_v();
     }
 
+
+    ///////////////////Save & Load//////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////
+    #define writeit(what,str)                               \
+    do                                                    \
+        {                                                   \
+        msg << str << " = " << what << " ";               \
+        bin_text_read_write_fixed (model_file,            \
+                                    (char*) &what,         \
+                                    sizeof (what),         \
+                                    "",                    \
+                                    read,                  \
+                                    msg,                   \
+                                    text);                 \
+        }                                                   \
+    while (0);
+
+    #define writeitvar(what,str,mywhat)                     \
+    auto mywhat = (what);                                 \
+    do                                                    \
+        {                                                   \
+        msg << str << " = " << mywhat << " ";             \
+        bin_text_read_write_fixed (model_file,            \
+                                    (char*) &mywhat,       \
+                                    sizeof (mywhat),       \
+                                    "",                    \
+                                    read,                  \
+                                    msg,                   \
+                                    text);                 \
+        }                                                   \
+    while (0);
+
+    void save_load_example(example* ec, io_buf& model_file, bool read, bool text, stringstream& msg)
+    {   //deal with tag
+        writeitvar(ec->tag.size(), "tags", tag_number);
+        if (read){
+            ec->tag.erase();
+            for (uint32_t i = 0; i < tag_number; i++)
+                ec->tag.push_back('a');
+        }
+        for (uint32_t i = 0; i < tag_number; i++)
+            writeit(ec->tag[i], "tag");
+
+        //deal with tag:
+        writeitvar(ec->indices.size(), "namespaces", namespace_size);
+        if (read){
+            ec->indices.erase();
+            for (uint32_t i = 0; i< namespace_size; i++)
+                ec->indices.push_back('a');
+        }
+        for(uint32_t i = 0; i < namespace_size; i++)
+            writeit(ec->indices[i], "namespace_index");
+
+        //deal with features
+        for (auto nc:ec->indices){
+            writeitvar(ec->feature_space[nc].size(), "features", feat_size);
+            if (read){
+                ec->feature_space[nc].erase();
+                for (uint32_t f_i = 0; f_i < feat_size; f_i++)
+                    ec->feature_space[nc].push_back(0, 0);
+            }
+            for (uint32_t f_i = 0; f_i < feat_size; f_i++){
+                writeit(ec->feature_space[nc].values[f_i], "value");
+                writeit(ec->feature_space[nc].indicies[f_i], "index");
+            }
+        }
+        //deal with labels:
+        writeit(ec->l.multi.label, "multiclass_label");
+        writeit(ec->l.multi.weight, "multiclass_weight");
+        writeit(ec->num_features, "num_features");
+        writeit(ec->total_sum_feat_sq, "total_sum_features");
+        writeit(ec->weight, "example_weight");
+        writeit(ec->loss, "loss");
+    }
+
+    void save_load_node(node* cn, io_buf& model_file, bool read, bool text, stringstream& msg)
+    {
+        writeit(cn->parent, "parent");
+        writeit(cn->internal, "internal");
+        writeit(cn->depth, "depth");
+        writeit(cn->base_router, "base_router");
+        writeit(cn->left, "left");
+        writeit(cn->right, "right");
+        writeit(cn->nl, "nl");
+        writeit(cn->nr, "nr");
+        writeitvar(cn->examples_index.size(), "leaf_n_examples", leaf_n_examples);
+        if (read){
+            cn->examples_index.erase();
+            for (uint32_t k = 0; k < leaf_n_examples; k++)
+                cn->examples_index.push_back(0);
+        }
+        for (uint32_t k = 0; k < leaf_n_examples; k++)
+            writeit(cn->examples_index[k], "example_location");
+    }
+
+    void save_load_memory_tree(memory_tree& b, io_buf& model_file, bool read, bool text)
+    {
+        if (model_file.files.size() > 0){
+            stringstream msg;
+            writeit(b.max_leaf_examples, "max_leaf_examples");
+            writeit(b.max_depth, "max_depth");
+            writeit(b.alpha, "alpha");
+            writeit(b.path_id_feat, "path_feature");
+            writeitvar(b.nodes.size(), "nodes", n_nodes);
+            if (read){
+                b.nodes.erase();
+                for (uint32_t i = 0; i < n_nodes; i++)
+                    b.nodes.push_back(node());
+            }
+            //node
+            for(uint32_t i = 0; i < n_nodes; i++)
+                save_load_node(&b.nodes[i], model_file, read, text, msg);
+            
+            //deal with examples:
+            writeitvar(b.examples.size(), "examples", n_examples);
+            if (read){
+                b.examples.erase();
+                for (uint32_t i = 0; i < n_examples; i++){
+                    example* new_ec = &calloc_or_throw<example>();
+                    b.examples.push_back(new_ec);
+                }
+            }
+            for (uint32_t i = 0; i < n_examples; i++)
+                save_load_example(b.examples[i], model_file, read, text, msg);
+        }
+    }
+    /////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////End of Save & Load///////////////////////////////
+
 } //namespace
+
+
+
 
 
 base_learner* memory_tree_setup(vw& all)
@@ -728,7 +837,7 @@ base_learner* memory_tree_setup(vw& all)
         all.trace_message << "memory_tree:" << " "
                     <<"max_depth = "<< tree.max_depth << " " 
                     <<"max_leaf_examples = "<<tree.max_leaf_examples<<" "
-                    <<"Alpha = "<<tree.alpha
+                    <<"alpha = "<<tree.alpha
                     <<std::endl;
     
     learner<memory_tree>& l = 
@@ -740,6 +849,7 @@ base_learner* memory_tree_setup(vw& all)
                 tree.max_routers + 1);
     
     srand(time(0));
+    l.set_save_load(save_load_memory_tree);
     l.set_finish(finish);
 
     return make_base (l);
