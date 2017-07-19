@@ -415,7 +415,7 @@ namespace memory_tree_ns
             else if ((b.nodes[cn].nl >= 1) && (b.nodes[cn].nr >= 1))
                 pred = merand48(b.all->random_state) < (b.nodes[cn].nl*1./(b.nodes[cn].nr+b.nodes[cn].nl)) ? -1.f : 1.f;
             else{
-                w<<cn<<" "<<b.nodes[cn].nl<<" "<<b.nodes[cn].nr<<endl;
+                cout<<cn<<" "<<b.nodes[cn].nl<<" "<<b.nodes[cn].nr<<endl;
                 cout<<"Error:  nl = 0, and nr = 0, exit...";
                 exit(0);
             }
@@ -586,10 +586,6 @@ namespace memory_tree_ns
 
     void predict(memory_tree& b, base_learner& base, example& test_ec)
     {
-        b.iter++;
-        if (b.iter % 1000 == 0)
-            cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
-
         example& ec = calloc_or_throw<example>();
         //ec = *b.examples[b.iter];
         copy_example_data(&ec, &test_ec);
@@ -675,18 +671,23 @@ namespace memory_tree_ns
     void learn(memory_tree& b, base_learner& base, example& ec)
     {        
         if (b.test_mode == false){
-            //cout<<b.max_depth<<endl;
+            predict(b, base, ec);
+
             example* new_ec = &calloc_or_throw<example>();
             copy_example_data(new_ec, &ec);
             remove_repeat_features_in_ec(*new_ec); ////sort unique.
             b.examples.push_back(new_ec);   
             b.num_ecs++; 
             insert_example(b, base, b.num_ecs-1);
-            if (b.iter % 5 == 0)
-                experience_replay(b, base);   
+            //if (b.iter % 100 == 0)
+            //    experience_replay(b, base);   
         }
-        else if (b.test_mode == true)
+        else if (b.test_mode == true){
+            b.iter++;
+            if (b.iter % 5000 == 0)
+                cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
             predict(b, base, ec);
+        }
 
     } 
 
