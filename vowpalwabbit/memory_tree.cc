@@ -415,7 +415,7 @@ namespace memory_tree_ns
             else if ((b.nodes[cn].nl >= 1) && (b.nodes[cn].nr >= 1))
                 pred = merand48(b.all->random_state) < (b.nodes[cn].nl*1./(b.nodes[cn].nr+b.nodes[cn].nl)) ? -1.f : 1.f;
             else{
-                cout<<cn<<" "<<b.nodes[cn].nl<<" "<<b.nodes[cn].nr<<endl;
+                w<<cn<<" "<<b.nodes[cn].nl<<" "<<b.nodes[cn].nr<<endl;
                 cout<<"Error:  nl = 0, and nr = 0, exit...";
                 exit(0);
             }
