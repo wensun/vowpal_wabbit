@@ -7,11 +7,11 @@
 
 #include "reductions.h"
 #include "rand48.h"
+#include "vw.h"
 
 
 using namespace std;
 using namespace LEARNER;
-//using namespace VW;
 
 namespace memory_tree_ns
 {
@@ -68,6 +68,19 @@ namespace memory_tree_ns
         dst->sorted = src->sorted;
         dst->in_use = src->in_use;
     }
+
+    inline void free_example(example* ec)
+    {
+        ec->tag.delete_v();
+        if (ec->passthrough){
+            ec->passthrough->delete_v();
+        }
+        for (int i = 0; i < 256; i++)
+            ec->feature_space[i].delete_v();
+        ec->indices.delete_v();
+        free(ec);
+    }
+
 
 
     void remove_repeat_features_in_f(features& f)
@@ -555,9 +568,8 @@ namespace memory_tree_ns
                     max_score = score;
                     max_pos = (int64_t)loc;
                 }
-                free(kprod_ec);
+                free_example(kprod_ec);
             }
-            //cout<<max_score<<" and pos: "<<max_pos<<endl;
             return max_pos;
         }
         else
@@ -580,7 +592,7 @@ namespace memory_tree_ns
                 add_node_id_feature(b, cn, *kprod_ec);
             
             base.learn(*kprod_ec, b.max_routers);
-            free(kprod_ec);
+            free_example(kprod_ec);
         }
     }
 
@@ -627,6 +639,10 @@ namespace memory_tree_ns
             test_ec.loss = test_ec.weight;
             b.num_mistakes++;
         }
+        free_example(&ec);
+        //example* tmp_ec = &calloc_or_throw<example>();
+        //tmp_ec = &ec;
+        //free(tmp_ec);
     }
 
     //node here the ec is already stored in the b.examples, the task here is to rout it to the leaf, 
@@ -698,11 +714,10 @@ namespace memory_tree_ns
             b.nodes[i].examples_index.delete_v();
         b.nodes.delete_v();
         for (size_t i = 0; i < b.examples.size(); i++)
-            free(b.examples[i]);
+            free_example(b.examples[i]);
         b.examples.delete_v();
         cout<<b.max_nodes<<endl;
     }
-
 
     ///////////////////Save & Load//////////////////////////////////////
     ////////////////////////////////////////////////////////////////////
@@ -872,7 +887,7 @@ base_learner* memory_tree_setup(vw& all)
     tree.max_nodes = vm["memory_tree"].as<uint32_t>();
     if (vm.count("leaf_example_multiplier"))
       {
-	tree.max_leaf_examples = vm["leaf_example_multiplier"].as<uint32_t>() * log(tree.max_nodes);
+	tree.max_leaf_examples = vm["leaf_example_multiplier"].as<uint32_t>() * (log(tree.max_nodes)/log(2));
 	*all.file_options << " --leaf_example_multiplier " << vm["leaf_example_multiplier"].as<uint32_t>();
       }
     if (vm.count("Alpha"))
