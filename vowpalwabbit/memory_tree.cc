@@ -416,7 +416,11 @@ namespace memory_tree_ns
         flat_example* fec1 = flatten_example(*b.all, ec1);
         flat_example* fec2 = flatten_example(*b.all, ec2);
         float linear_prod = linear_kernel(fec1, fec2);
-        float l2_dis = ec1->total_sum_feat_sq + ec2->total_sum_feat_sq - 2.*linear_prod;
+        float l2_dis = 1. + 1. - 2.*linear_prod/pow(ec1->total_sum_feat_sq*ec2->total_sum_feat_sq, 0.5);
+        fec1->fs.delete_v(); 
+        fec2->fs.delete_v();
+        free(fec1);
+        free(fec2);
         return l2_dis;
     }
 
@@ -745,9 +749,9 @@ namespace memory_tree_ns
             b.examples.push_back(new_ec);   
             b.num_ecs++; 
             insert_example(b, base, b.num_ecs-1);
-            //if (b.iter % 1 == 0)
-            //for (int i = 0; i < 10*log(b.num_ecs)/log(2); i++)
-            //    experience_replay(b, base);   
+            //if (b.iter % 2 == 0)
+            for (int i = 0; i < 10; i++)
+                experience_replay(b, base);   
         }
         else if (b.test_mode == true){
             b.iter++;
