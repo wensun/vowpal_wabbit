@@ -363,6 +363,7 @@ namespace memory_tree_ns
         uint32_t num_ecs;
         uint32_t num_test_ecs;
         uint32_t test_mistakes;
+        bool learn_at_leaf;
 
         bool test_mode;
 
@@ -378,10 +379,48 @@ namespace memory_tree_ns
             num_test_ecs = 0;
             path_id_feat = false;
             test_mode = false;
-
             max_depth = 0;
         }
     };
+
+    float linear_kernel(const flat_example* fec1, const flat_example* fec2)
+    { float dotprod = 0;
+   
+     features& fs_1 = (features&)fec1->fs;
+     features& fs_2 = (features&)fec2->fs;
+     if (fs_2.indicies.size() == 0)
+       return 0.f;
+   
+     int numint = 0;
+     for (size_t idx1 = 0, idx2 = 0; idx1 < fs_1.size() && idx2 < fs_2.size() ; idx1++)
+     { uint64_t ec1pos = fs_1.indicies[idx1];
+       uint64_t ec2pos = fs_2.indicies[idx2];
+       //params.all->trace_message<<ec1pos<<" "<<ec2pos<<" "<<idx1<<" "<<idx2<<" "<<f->x<<" "<<ec2f->x<<endl;
+       if(ec1pos < ec2pos) continue;
+   
+       while(ec1pos > ec2pos && ++idx2 < fs_2.size())
+         ec2pos = fs_2.indicies[idx2];
+   
+       if(ec1pos == ec2pos)
+       { //params.all->trace_message<<ec1pos<<" "<<ec2pos<<" "<<idx1<<" "<<idx2<<" "<<f->x<<" "<<ec2f->x<<endl;
+         numint++;
+         dotprod += fs_1.values[idx1] * fs_2.values[idx2];
+         ++idx2;
+       }
+     }
+     return dotprod;
+   }
+
+    float compute_l2_distance(memory_tree& b, example* ec1, example* ec2)
+    {
+        flat_example* fec1 = flatten_example(*b.all, ec1);
+        flat_example* fec2 = flatten_example(*b.all, ec2);
+        float linear_prod = linear_kernel(fec1, fec2);
+        float l2_dis = ec1->total_sum_feat_sq + ec2->total_sum_feat_sq - 2.*linear_prod;
+        return l2_dis;
+    }
+
+
 
     void init_tree(memory_tree& b)
     {
@@ -394,7 +433,8 @@ namespace memory_tree_ns
         b.max_routers = b.max_nodes;
         cout<<"tree initiazliation is done...."<<endl
             <<"max nodes "<<b.max_nodes<<endl
-            <<"tree size: "<<b.nodes.size()<<endl;
+            <<"tree size: "<<b.nodes.size()<<endl
+            <<"learn at leaf: "<<b.learn_at_leaf<<endl;
     }
 
 
@@ -558,17 +598,24 @@ namespace memory_tree_ns
             int64_t max_pos = -1;
             for(size_t i = 0; i < b.nodes[cn].examples_index.size(); i++)
             {
+                float score = 0.f;
                 uint32_t loc = b.nodes[cn].examples_index[i];
-                example* kprod_ec = &calloc_or_throw<example>();
-                diag_kronecker_product(ec, *b.examples[loc], *kprod_ec);
+
+                if (b.learn_at_leaf == true){
+                    cout<<"learn at leaf"<<endl;
+                    example* kprod_ec = &calloc_or_throw<example>();
+                    diag_kronecker_product(ec, *b.examples[loc], *kprod_ec);
+                    base.predict(*kprod_ec, b.max_routers);
+                    score = kprod_ec->pred.scalar;
+                    free_example(kprod_ec);
+                }
+                else
+                    score = -1.*compute_l2_distance(b, &ec, b.examples[loc]); 
                 
-                base.predict(*kprod_ec, b.max_routers);
-                float score = kprod_ec->pred.scalar;
                 if (score > max_score){
                     max_score = score;
                     max_pos = (int64_t)loc;
                 }
-                free_example(kprod_ec);
             }
             return max_pos;
         }
@@ -601,7 +648,7 @@ namespace memory_tree_ns
         example& ec = calloc_or_throw<example>();
         //ec = *b.examples[b.iter];
         copy_example_data(&ec, &test_ec);
-        remove_repeat_features_in_ec(ec);
+        //remove_repeat_features_in_ec(ec);
 
         /*
         size_t ss = b.all->weights.stride_shift();
@@ -667,8 +714,10 @@ namespace memory_tree_ns
             //if the number of examples exceeds the max_leaf_examples, and not reach the max_nodes - 2 yet, we split:
             if((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size() + 2 <= b.max_nodes))
 	            split_leaf(b, base, cn); 
-            else
-	            learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]);  //learn similarity function at leaf
+            else{
+                if (b.learn_at_leaf == true)
+	                learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]);  //learn similarity function at leafb.l
+            }
         }
     }
 
@@ -687,15 +736,17 @@ namespace memory_tree_ns
     void learn(memory_tree& b, base_learner& base, example& ec)
     {        
         if (b.test_mode == false){
+            b.iter++;
             predict(b, base, ec);
 
             example* new_ec = &calloc_or_throw<example>();
             copy_example_data(new_ec, &ec);
-            remove_repeat_features_in_ec(*new_ec); ////sort unique.
+            //remove_repeat_features_in_ec(*new_ec); ////sort unique.
             b.examples.push_back(new_ec);   
             b.num_ecs++; 
             insert_example(b, base, b.num_ecs-1);
-            //if (b.iter % 100 == 0)
+            //if (b.iter % 1 == 0)
+            //for (int i = 0; i < 10*log(b.num_ecs)/log(2); i++)
             //    experience_replay(b, base);   
         }
         else if (b.test_mode == true){
@@ -840,6 +891,7 @@ namespace memory_tree_ns
             }
             
             writeit(b.max_nodes, "max_nodes");
+            writeit(b.learn_at_leaf, "learn_at_leaf");
             writeitvar(b.nodes.size(), "nodes", n_nodes); 
 
             if (read){
@@ -878,6 +930,7 @@ base_learner* memory_tree_setup(vw& all)
     
     new_options(all, "memory tree options")
       ("leaf_example_multiplier", po::value<uint32_t>()->default_value(1.0), "multiplier on examples per leaf (default = log nodes)")
+      ("learn_at_leaf", po::value<bool>()->default_value(true), "whether or not learn at leaf (defualt = True)")
       ("Alpha", po::value<float>()->default_value(0.1), "Alpha");
      add_options(all);
 
@@ -885,6 +938,8 @@ base_learner* memory_tree_setup(vw& all)
     memory_tree& tree = calloc_or_throw<memory_tree> ();
     tree.all = &all;
     tree.max_nodes = vm["memory_tree"].as<uint32_t>();
+    tree.learn_at_leaf = vm["learn_at_leaf"].as<bool>();
+
     if (vm.count("leaf_example_multiplier"))
       {
 	tree.max_leaf_examples = vm["leaf_example_multiplier"].as<uint32_t>() * (log(tree.max_nodes)/log(2));
