@@ -413,10 +413,10 @@ namespace memory_tree_ns
 
     float compute_l2_distance(memory_tree& b, example* ec1, example* ec2)
     {
-        flat_example* fec1 = flatten_example(*b.all, ec1);
-        flat_example* fec2 = flatten_example(*b.all, ec2);
+        flat_example* fec1 = flatten_sort_example(*b.all, ec1);
+        flat_example* fec2 = flatten_sort_example(*b.all, ec2);
         float linear_prod = linear_kernel(fec1, fec2);
-        float l2_dis = 1. + 1. - 2.*linear_prod/pow(ec1->total_sum_feat_sq*ec2->total_sum_feat_sq, 0.5);
+        float l2_dis = 1. + 1. - 2.*linear_prod/pow(fec1->total_sum_feat_sq*fec2->total_sum_feat_sq, 0.5);
         fec1->fs.delete_v(); 
         fec2->fs.delete_v();
         free(fec1);
@@ -650,33 +650,24 @@ namespace memory_tree_ns
     void predict(memory_tree& b, base_learner& base, example& test_ec)
     {
         example& ec = calloc_or_throw<example>();
-        //ec = *b.examples[b.iter];
         copy_example_data(&ec, &test_ec);
-        //remove_repeat_features_in_ec(ec);
-
-        /*
-        size_t ss = b.all->weights.stride_shift();
-        for (auto nc : ec.indices){
-            for (size_t i = 0; i < ec.feature_space[nc].indicies.size(); i++)
-                ec.feature_space[nc].indicies[i] = (ec.feature_space[nc].indicies[i]<<ss);  //>>
-        }*/
+        //remove_repeat_features_in_ec(ec); ////sort unique.
         
         MULTICLASS::label_t mc = ec.l.multi;
         uint32_t save_multi_pred = ec.pred.multiclass;
-        uint32_t cn = 0;
         
-        while(b.nodes[cn].internal == 1) //if it's internal
-        {
-            //cout<<"at node "<<cn<<endl;
-            base.predict(ec, b.nodes[cn].base_router);
-            uint32_t newcn = ec.pred.scalar < 0 ? b.nodes[cn].left : b.nodes[cn].right; //do not need to increment nl and nr.
-            cn = newcn;
+        float min_dis = FLT_MAX;
+        size_t closest_ec = 0;
+        for (size_t i = 0; i < b.examples.size(); i++){
+            float dis = compute_l2_distance(b, &ec, b.examples[i]);
+            if (dis < min_dis){
+                min_dis = dis;
+                closest_ec = i;
+            }
         }
-         
         ec.l.multi = mc; 
         ec.pred.multiclass = save_multi_pred;
 
-        int64_t closest_ec = pick_nearest(b, base, cn, ec);
         if (closest_ec != -1){
             ec.pred.multiclass = b.examples[closest_ec]->l.multi.label;
             test_ec.pred.multiclass = b.examples[closest_ec]->l.multi.label;
@@ -691,9 +682,6 @@ namespace memory_tree_ns
             b.num_mistakes++;
         }
         free_example(&ec);
-        //example* tmp_ec = &calloc_or_throw<example>();
-        //tmp_ec = &ec;
-        //free(tmp_ec);
     }
 
     //node here the ec is already stored in the b.examples, the task here is to rout it to the leaf, 
@@ -740,18 +728,11 @@ namespace memory_tree_ns
     void learn(memory_tree& b, base_learner& base, example& ec)
     {        
         if (b.test_mode == false){
-            b.iter++;
-            predict(b, base, ec);
-
             example* new_ec = &calloc_or_throw<example>();
             copy_example_data(new_ec, &ec);
             //remove_repeat_features_in_ec(*new_ec); ////sort unique.
-            b.examples.push_back(new_ec);   
-            b.num_ecs++; 
-            insert_example(b, base, b.num_ecs-1);
-            //if (b.iter % 2 == 0)
-            for (int i = 0; i < 10; i++)
-                experience_replay(b, base);   
+            b.examples.push_back(new_ec);  
+    
         }
         else if (b.test_mode == true){
             b.iter++;
@@ -882,32 +863,6 @@ namespace memory_tree_ns
             if (read)
                 b.test_mode = true;
 
-            if (read)
-            {
-                size_t ss = 0;
-                writeit(ss, "stride_shift");
-                b.all->weights.stride_shift(ss);
-            }
-            else
-            {
-                size_t ss = b.all->weights.stride_shift();
-                writeit(ss, "stride_shift");
-            }
-            
-            writeit(b.max_nodes, "max_nodes");
-            writeit(b.learn_at_leaf, "learn_at_leaf");
-            writeitvar(b.nodes.size(), "nodes", n_nodes); 
-
-            if (read){
-                b.nodes.erase();
-                for (uint32_t i = 0; i < n_nodes; i++)
-                    b.nodes.push_back(node());
-            }
-            
-            //node  
-            for(uint32_t i = 0; i < n_nodes; i++){
-                save_load_node(b.nodes[i], model_file, read, text, msg);
-            }
             //deal with examples:
             writeitvar(b.examples.size(), "examples", n_examples);
             if (read){
