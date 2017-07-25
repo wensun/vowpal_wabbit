@@ -334,8 +334,8 @@ namespace memory_tree_ns
             base_router = 0;
             left = 0;
             right = 0;
-            nl = 0.01; //initilze to 1, as we need to do nl/nr.
-            nr = 0.01; 
+            nl = 0.001; //initilze to 1, as we need to do nl/nr.
+            nr = 0.001; 
             examples_index = v_init<uint32_t>();
         }
     };
@@ -356,6 +356,8 @@ namespace memory_tree_ns
         int iter;
 
         size_t max_depth;
+        size_t max_ex_in_leaf;
+
 
         bool path_id_feat;
 
@@ -380,6 +382,7 @@ namespace memory_tree_ns
             path_id_feat = false;
             test_mode = false;
             max_depth = 0;
+            max_ex_in_leaf = 0;
         }
     };
 
@@ -413,10 +416,10 @@ namespace memory_tree_ns
 
     float compute_l2_distance(memory_tree& b, example* ec1, example* ec2)
     {
-        flat_example* fec1 = flatten_example(*b.all, ec1);
-        flat_example* fec2 = flatten_example(*b.all, ec2);
+        flat_example* fec1 = flatten_sort_example(*b.all, ec1);
+        flat_example* fec2 = flatten_sort_example(*b.all, ec2);
         float linear_prod = linear_kernel(fec1, fec2);
-        float l2_dis = 1. + 1. - 2.*linear_prod/pow(ec1->total_sum_feat_sq*ec2->total_sum_feat_sq, 0.5);
+        float l2_dis = 1. + 1. - 2.*linear_prod/pow(fec1->total_sum_feat_sq*fec2->total_sum_feat_sq, 0.5);
         fec1->fs.delete_v(); 
         fec2->fs.delete_v();
         free(fec1);
@@ -424,7 +427,7 @@ namespace memory_tree_ns
         return l2_dis;
     }
 
-
+  
 
     void init_tree(memory_tree& b)
     {
@@ -501,19 +504,21 @@ namespace memory_tree_ns
         //note: here we first train the router and then predict.
         MULTICLASS::label_t mc = ec.l.multi;
         uint32_t save_multi_pred = ec.pred.multiclass;
+        ec.l.simple.label = 1.;
 
         base.predict(ec, b.nodes[cn].base_router);
         float prediction = ec.pred.scalar; 
-        float imp_weight = 1.; //no importance weight.
-        double weighted_value = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr)+b.alpha*prediction;
-        float route_label = weighted_value < 0. ? -1.f : 1.f;
+        float imp_weight = 1.f; //no importance weight.
         
-        ec.l.simple = {route_label, imp_weight, 0.};
+        double weighted_value = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr)/log(2.)+b.alpha*prediction;
+        float route_label = weighted_value < 0.f ? -1.f : 1.f;
+        
+
+        ec.l.simple = {route_label, imp_weight, 0.f};
         base.learn(ec, b.nodes[cn].base_router); //update the router according to the new example.
         
         base.predict(ec, b.nodes[cn].base_router);
         float save_binary_scalar = ec.pred.scalar;
-        
         ec.l.multi = mc;
         ec.pred.multiclass = save_multi_pred;
 
@@ -525,7 +530,7 @@ namespace memory_tree_ns
     //when the number of examples is too big
     void split_leaf(memory_tree& b, base_learner& base, const uint32_t cn)
     {
-        //create two children:
+        //create two children
         b.nodes[cn].internal = 1; //swith to internal node.
         uint32_t left_child = (uint32_t)b.nodes.size();
         b.nodes.push_back(node());
@@ -535,6 +540,11 @@ namespace memory_tree_ns
         b.nodes.push_back(node());  
         b.nodes[right_child].internal = -1;  //right leaf
         b.nodes[right_child].base_router = (b.routers_used++); 
+
+        if (b.nodes[cn].depth + 1 > b.max_depth)
+            b.max_depth = b.nodes[cn].depth + 1;
+        //cout<<b.max_depth<<endl;
+
 
         b.nodes[cn].left = left_child;
         b.nodes[cn].right = right_child;
@@ -552,6 +562,7 @@ namespace memory_tree_ns
             uint32_t ec_pos = b.nodes[cn].examples_index[ec_id];
             MULTICLASS::label_t mc = b.examples[ec_pos]->l.multi;
             uint32_t save_multi_pred = b.examples[ec_pos]->pred.multiclass;
+            b.examples[ec_pos]->l.simple.label = 1.;
 
             base.predict(*b.examples[ec_pos], b.nodes[cn].base_router); //re-predict
             float scalar = b.examples[ec_pos]->pred.scalar;
@@ -571,8 +582,15 @@ namespace memory_tree_ns
             b.examples[ec_pos]->pred.multiclass = save_multi_pred;
         }
         b.nodes[cn].examples_index.delete_v(); //empty the cn's example list
-        b.nodes[cn].nl = std::max(double(b.nodes[left_child].examples_index.size()), 0.01); //avoid to set nl to zero
-        b.nodes[cn].nr = std::max(double(b.nodes[right_child].examples_index.size()), 0.01); //avoid to set nr to zero
+        b.nodes[cn].nl = std::max(double(b.nodes[left_child].examples_index.size()), 0.001); //avoid to set nl to zero
+        b.nodes[cn].nr = std::max(double(b.nodes[right_child].examples_index.size()), 0.001); //avoid to set nr to zero
+
+        if (std::max(b.nodes[cn].nl, b.nodes[cn].nr) > b.max_ex_in_leaf)
+        {
+            b.max_ex_in_leaf = std::max(b.nodes[cn].nl, b.nodes[cn].nr);
+            cout<<b.max_ex_in_leaf<<endl;
+        }
+
     }
     
     //add path feature:
@@ -606,9 +624,10 @@ namespace memory_tree_ns
                 uint32_t loc = b.nodes[cn].examples_index[i];
 
                 if (b.learn_at_leaf == true){
-                    cout<<"learn at leaf"<<endl;
+                    //cout<<"learn at leaf"<<endl;
                     example* kprod_ec = &calloc_or_throw<example>();
                     diag_kronecker_product(ec, *b.examples[loc], *kprod_ec);
+                    kprod_ec->l.simple = {-1., 1., 0.};
                     base.predict(*kprod_ec, b.max_routers);
                     score = kprod_ec->pred.scalar;
                     free_example(kprod_ec);
@@ -638,9 +657,7 @@ namespace memory_tree_ns
                 kprod_ec->l.simple = {1., 1., 0.};
             else
                 kprod_ec->l.simple = {-1., 1., 0.}; //reward = 0:
-            
-            if (b.path_id_feat == true)
-                add_node_id_feature(b, cn, *kprod_ec);
+        
             
             base.learn(*kprod_ec, b.max_routers);
             free_example(kprod_ec);
@@ -652,8 +669,7 @@ namespace memory_tree_ns
         example& ec = calloc_or_throw<example>();
         //ec = *b.examples[b.iter];
         copy_example_data(&ec, &test_ec);
-        //remove_repeat_features_in_ec(ec);
-
+        remove_repeat_features_in_ec(ec);
         /*
         size_t ss = b.all->weights.stride_shift();
         for (auto nc : ec.indices){
@@ -664,6 +680,7 @@ namespace memory_tree_ns
         MULTICLASS::label_t mc = ec.l.multi;
         uint32_t save_multi_pred = ec.pred.multiclass;
         uint32_t cn = 0;
+        ec.l.simple.label = -1;
         
         while(b.nodes[cn].internal == 1) //if it's internal
         {
@@ -712,15 +729,22 @@ namespace memory_tree_ns
         if(b.nodes[cn].internal == -1) //get to leaf:
         {   
             b.nodes[cn].examples_index.push_back(ec_array_index);
+            if (b.nodes[cn].examples_index.size() > b.max_ex_in_leaf)
+            {
+                b.max_ex_in_leaf = b.nodes[cn].examples_index.size();
+                //cout<<cn<<" "<<b.max_ex_in_leaf<<endl;
+            }
             float leaf_pred = train_node(b, base, *b.examples[ec_array_index], cn); //tain the leaf as well.
             descent(b.nodes[cn], leaf_pred); //this is a faked descent, the purpose is only to update nl and nr of cn
 
             //if the number of examples exceeds the max_leaf_examples, and not reach the max_nodes - 2 yet, we split:
-            if((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size() + 2 <= b.max_nodes))
-	            split_leaf(b, base, cn); 
+            if((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size() + 2 <= b.max_nodes)){
+                split_leaf(b, base, cn); 
+            }
             else{
-                if (b.learn_at_leaf == true)
+                if (b.learn_at_leaf == true){
 	                learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]);  //learn similarity function at leafb.l
+                }
             }
         }
     }
@@ -742,15 +766,17 @@ namespace memory_tree_ns
         if (b.test_mode == false){
             b.iter++;
             predict(b, base, ec);
+            if (b.iter%5000 == 0)
+                cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
 
             example* new_ec = &calloc_or_throw<example>();
             copy_example_data(new_ec, &ec);
-            //remove_repeat_features_in_ec(*new_ec); ////sort unique.
+            remove_repeat_features_in_ec(*new_ec); ////sort unique.
             b.examples.push_back(new_ec);   
             b.num_ecs++; 
             insert_example(b, base, b.num_ecs-1);
-            //if (b.iter % 2 == 0)
-            for (int i = 0; i < 10; i++)
+            //if (b.iter % 1 == 0)
+            for (int i = 0; i < 1; i++)
                 experience_replay(b, base);   
         }
         else if (b.test_mode == true){
@@ -981,3 +1007,8 @@ base_learner* memory_tree_setup(vw& all)
 
 
 
+
+
+
+
+//learning rate for aloi: 0.0001
