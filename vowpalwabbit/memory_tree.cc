@@ -302,6 +302,43 @@ namespace memory_tree_ns
         }
     }
 
+    template<typename T>  //T: int, or double
+    void pick_max(v_array<T>& array, size_t& p)
+    {
+        float max = -FLT_MAX;
+        p = 0;
+        for (size_t i = 0; i < array.size(); i++){
+            if (array[i] > max)
+            {
+                max = array[i];
+                p = i;
+            }
+        }
+        return 
+    }
+
+    template<typename T>
+    void pick_k_max(v_array<T>& array, int k, v_array<size_t>& positions)
+    {   positions = v_init<size_t>();
+        if (k >= array.size())
+        {
+            for (size_t i = 0; i < array.size(); i++)
+                positions.push_back(i);
+            return;
+        }
+        v_array<T> tmp_array = v_init<T>();
+        for (auto item : array){
+            tmp_array.push_back(item);
+        }
+        for (int i = 0; i < k; i++){
+            size_t max_pos = 0;
+            pick_max(tmp_array, max_pos);
+            positions.push_back(max_pos);
+            tmp_array[max_pos] = -FLT_MAX;
+        }
+    }
+
+
     ////////////////////////////end of helper/////////////////////////
     //////////////////////////////////////////////////////////////////
 
@@ -427,7 +464,46 @@ namespace memory_tree_ns
         return l2_dis;
     }
 
-  
+    size_t compute_avg_cost_return_max_pos(memory_tree& b, v_array<size_t>& positions_in_b)
+    {
+        cost_sensitive::label tmpcs;
+        tmpcs.delete_v();
+        tmpcs.resize(0);
+        for (size_t pos : positions_in_b){
+            for (auto wc : b.examples[pos]->l.cs){
+                float c = wc.x;
+                uint32_t ind = wc.class_index;
+
+                bool flag = false;
+                int i = 0;
+                for (i = 0; i < tmpcs.size(); i++){
+                    if (tmpcs[i].class_index == ind){
+                        flag = true;
+                        break;
+                    }
+                }
+                if (flag == false){
+                    cost_sensitive::wclass tmpwclass;
+                    tmpwclass.x = c;
+                    tmpwclass.class_index = ind;
+                }
+                else{
+                    tmpcs[i].x += c;
+                }
+            }
+        }
+        size_t min_pos = 0;
+        float min_cost = FLT_MAX;
+        for (size_t i = 0; i < tmpcs.size(); i++){
+            if (min_cost > tmpcs[i].x){
+                min_cost = tmpcs[i].x;
+                min_pos = i;
+            }
+        }
+        return min_pos;
+    }
+
+
 
     void init_tree(memory_tree& b)
     {
