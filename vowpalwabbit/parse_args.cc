@@ -56,6 +56,7 @@ license as described in the file LICENSE.
 #include "log_multi.h"
 #include "recall_tree.h"
 #include "memory_tree.h"
+#include "log_multi_label_tree.h"
 #include "stagewise_poly.h"
 #include "active.h"
 #include "active_cover.h"
@@ -1125,6 +1126,7 @@ void parse_reductions(vw& all)
   all.reduction_stack.push_back(log_multi_setup);
   all.reduction_stack.push_back(recall_tree_setup);
   all.reduction_stack.push_back(memory_tree_setup);
+  all.reduction_stack.push_back(log_time_multi_label_tree_setup);
   all.reduction_stack.push_back(multilabel_oaa_setup);
 
   all.reduction_stack.push_back(csoaa_setup);

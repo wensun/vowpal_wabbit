@@ -209,15 +209,15 @@ namespace memory_tree_ns
 
     ////Implement kronecker_product between two examples:
     //kronecker_prod at feature level:
-    void diag_kronecker_prod_fs(features& f1, features& f2, float& total_sum_feat_sq)
+    void diag_kronecker_prod_fs(features& f1, features& f2, float& total_sum_feat_sq, float norm_ec1, float norm_ec2)
     {
         for (size_t i1 = 0; i1 < f1.indicies.size(); i1++){
+            f1.values[i1] /= norm_ec1;
             size_t i2 = 0;
             for (i2 = 0; i2 < f2.indicies.size(); i2++){
                 if (f1.indicies[i1] == f2.indicies[i2]){
-                    f1.values[i1] *= f2.values[i2];
+                    f1.values[i1] *= (f2.values[i2]/norm_ec2);
                     total_sum_feat_sq += pow(f1.values[i1],2);
-                    //cout<<"in the same indices..."<<endl;
                     break;
                 }
             }
@@ -231,11 +231,14 @@ namespace memory_tree_ns
     {
         //ec <= ec1 X ec2
         copy_example_data(&ec, &ec1);
+        float norm_ec1 = pow(ec1.total_sum_feat_sq,0.5);
+        float norm_ec2 = pow(ec2.total_sum_feat_sq,0.5);
+
         ec.total_sum_feat_sq = 0.0;
         for(namespace_index c : ec.indices){
             for(namespace_index c2 : ec2.indices){
                 if (c == c2)
-                    diag_kronecker_prod_fs(ec.feature_space[c], ec2.feature_space[c2], ec.total_sum_feat_sq);
+                    diag_kronecker_prod_fs(ec.feature_space[c], ec2.feature_space[c2], ec.total_sum_feat_sq, norm_ec1, norm_ec2);
             }
         }
     }
@@ -775,8 +778,8 @@ namespace memory_tree_ns
             b.examples.push_back(new_ec);   
             b.num_ecs++; 
             insert_example(b, base, b.num_ecs-1);
-            //if (b.iter % 1 == 0)
-            for (int i = 0; i < 1; i++)
+            if (b.iter % 10 == 0)
+            //for (int i = 0; i < 10; i++)
                 experience_replay(b, base);   
         }
         else if (b.test_mode == true){
@@ -922,6 +925,9 @@ namespace memory_tree_ns
             
             writeit(b.max_nodes, "max_nodes");
             writeit(b.learn_at_leaf, "learn_at_leaf");
+            if (read)
+                cout<<b.learn_at_leaf<<endl;
+                
             writeitvar(b.nodes.size(), "nodes", n_nodes); 
 
             if (read){

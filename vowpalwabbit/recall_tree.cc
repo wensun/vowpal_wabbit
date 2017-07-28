@@ -368,7 +368,9 @@ float train_node (recall_tree& b,
 
 
 void learn (recall_tree& b, base_learner& base, example& ec)
-{ predict (b, base, ec);
+{ 
+  cout<<ec.l.simple.label<<endl;
+  predict (b, base, ec);
 
   if (b.all->training &&
       ec.l.multi.label != (uint32_t)-1) // if training the tree
