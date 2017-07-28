@@ -1,0 +1,1 @@
+LEARNER::base_learner* log_time_multi_label_tree_setup(vw& all);
