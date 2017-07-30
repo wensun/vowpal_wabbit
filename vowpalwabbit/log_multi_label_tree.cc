@@ -82,8 +82,13 @@ struct log_multi_label_tree {
     size_t max_depth;
     uint32_t iter;
     uint32_t mistakes; 
+    uint32_t num_ecs;
+
+    uint32_t test_flag;
+
 
     log_multi_label_tree(){
+        num_ecs = 0;
         k = 0;
         nodes = v_init<node>();
         F = 0;
@@ -91,6 +96,7 @@ struct log_multi_label_tree {
         max_depth = 0;
         mistakes = 0;
         iter = 0;
+        test_flag = false;
     }
 };
 
@@ -224,7 +230,7 @@ float fake_update_node(node& cnode, example& ec){
     cnode.n--;
     for (uint32_t label : labels)
         cnode.label_histogram[label-1]--;
-    for (int i = 0; i < cnode.top_F_label_info.size(); i++){
+    for (size_t i = 0; i < cnode.top_F_label_info.size(); i++){
         cnode.top_F_label_info[i].label = tmp_nodes[i].label;
         cnode.top_F_label_info[i].avg_rew = tmp_nodes[i].avg_rew;
     }
@@ -241,10 +247,10 @@ inline void save_restore_multilabel_info(example& ec,
     if (save == true){
         //v_array<uint32_t> tmp_l_multilabels = v_init<uint32_t>;
         //v_array<uint32_t> tmp_pred_multilabels=v_init<uint32_t>;
-        for (int i = 0; i < ec.l.multilabels.label_v.size(); i++)
+        for (size_t i = 0; i < ec.l.multilabels.label_v.size(); i++)
             tmp_l_multilabels.push_back(ec.l.multilabels.label_v[i]);
         
-        for (int i = 0; i < ec.pred.multilabels.label_v.size(); i++)
+        for (size_t i = 0; i < ec.pred.multilabels.label_v.size(); i++)
             tmp_pred_multilabels.push_back(ec.pred.multilabels.label_v[i]);
     } 
     else{
@@ -292,7 +298,7 @@ void train_internal_node(log_multi_label_tree&b, base_learner& base, uint32_t cn
                         + nl/(nr+nl+1.)*statistics_of_top_F(all_zeros_left, nl));
     
     float route_label = (benefit_left <= benefit_right ? 1.f : -1.f);
-    float weight = fabs((float)(benefit_left - benefit_right));
+    float weight = fabs((float)(benefit_left - benefit_right)*(1.));
     ec.l.simple = {route_label, weight, 0.};
     base.learn(ec, b.nodes[cn].base_router);
 
@@ -336,10 +342,12 @@ void train_at_leaf(log_multi_label_tree& b, base_learner& base, const uint32_t c
         bool in = in_v_array(ec_labels, label, pos);
         if (in == true){ //label is in the current example's label list:
             ec.l.simple = {1.f, 1.f, 0.f};
+            //ec.l.simple = {1.f, label_info.avg_rew, 0.f};
             base.learn (ec, b.max_routers + label - 1);
         }
         else{
             ec.l.simple = {-1.f, 1.f, 0.f};
+            //ec.l.simple = {-1.f, label_info.avg_rew, 0.f};
             base.learn(ec, b.max_routers + label -1);
         }
         ec.l.multilabels = multilabels;
@@ -350,6 +358,23 @@ void train_at_leaf(log_multi_label_tree& b, base_learner& base, const uint32_t c
     ec.l.multilabels = multilabels;
     //save_restore_multilabel_info(ec, tmp_l_multilabels, tmp_pred_multilabels, false);
 }
+
+
+bool terminate(log_multi_label_tree& b, uint32_t cn, uint32_t newcn)
+{
+    float cn_prob = b.nodes[cn].num_all_zeros*1./b.nodes[cn].n;
+    float newcn_prob = b.nodes[newcn].num_all_zeros*1./b.nodes[newcn].n;
+    float cn_prob_ub = cn_prob + pow(cn_prob*(1.-cn_prob)/b.nodes[cn].n, 0.5) + 1./b.nodes[cn].n;
+    float newcn_prob_ub = newcn_prob + pow(newcn_prob*(1.-newcn_prob)/b.nodes[newcn].n, 0.5) + 1./b.nodes[newcn].n;
+    if (cn_prob_ub <= newcn_prob_ub)
+        return true;
+    else
+        return false;
+
+    //    if (b.nodes[cn].num_all_zeros*1./b.nodes[cn].n) <= (b.nodes[newcn].num_all_zeros*1./b.nodes[newcn].n)
+    //        break;
+}
+
 
 
 uint32_t routing(log_multi_label_tree& b, base_learner& base, example& ec, bool training)
@@ -378,6 +403,13 @@ uint32_t routing(log_multi_label_tree& b, base_learner& base, example& ec, bool 
 
         if (training)
             update_node(b.nodes[newcn], ec);
+        
+        if (terminate(b, cn, newcn) == true){
+            //cout<<"early terminate"<<endl;
+            break;
+        }
+
+
         cn = newcn;
     }
     ec.pred.multilabels = preds;
@@ -409,6 +441,7 @@ void predict(log_multi_label_tree& b, base_learner& base, example& ec){
             max_label = top_f_lab.label;
         }
     }
+    remove_node_id_feature (b, node_id, ec);   
     //ec.l.simple = simple_lab;
     ec.l.multilabels = multilabels;
     ec.pred.multiclass = max_label;
@@ -416,23 +449,37 @@ void predict(log_multi_label_tree& b, base_learner& base, example& ec){
     preds.label_v.push_back(max_label);
     ec.pred.multilabels = preds;
 
-
-    remove_node_id_feature (b, node_id, ec);   
     
     uint32_t pos = 0;
     bool in = in_v_array(ec.l.multilabels.label_v, max_label, pos);
     if (in == false){
         //ec.loss = 1.;
-        b.mistakes++;
+        //if (b.num_ecs > 14146)
+        if (b.test_flag == true)
+            b.mistakes++;
     }
 
 }
 
 void learn(log_multi_label_tree& b, base_learner& base, example& ec){
-    predict(b, base, ec);
-    uint32_t node_id = 0;
-    node_id = routing(b, base, ec, true);
-    train_at_leaf(b, base, node_id, ec);
+    b.num_ecs ++;
+    if (b.num_ecs <= 1186239*2){
+    
+    //if (b.test_flag == false){
+        predict(b, base, ec);
+        uint32_t node_id = 0;
+        node_id = routing(b, base, ec, true);
+        train_at_leaf(b, base, node_id, ec);
+    }
+    else{
+        b.test_flag = true;
+        predict(b, base, ec);
+    }
+    //}
+    //else{
+    //    predict(b,base,ec);
+    //    cout<<"pred_erro: "<<b.mistakes*1./(b.num_ecs - 14146)<<endl;
+    //}
 }
 
 /////////////////////////////output stuff///////////////
@@ -528,6 +575,7 @@ void finish(log_multi_label_tree& b){
     }
     b.nodes.delete_v();
     cout<<"done clearning.."<<endl;
+    cout<<b.mistakes<<endl;
 }
 
 
@@ -604,6 +652,12 @@ void save_load_tree(log_multi_label_tree& b, io_buf& model_file, bool read, bool
         writeit(b.F, "max_candidates");
         writeit(b.max_depth, "max_depth");
         writeitvar(b.nodes.size(), "nodes", n_nodes);
+
+        if (read)
+            b.test_flag = true;
+
+        cout<<n_nodes<<endl;
+
         if (read){
             b.nodes.erase();
             for (uint32_t j =0; j< n_nodes; j++)
@@ -612,6 +666,7 @@ void save_load_tree(log_multi_label_tree& b, io_buf& model_file, bool read, bool
         for (uint32_t i = 0; i < n_nodes; i++)
             save_load_node(b.nodes[i], model_file, read, text, msg);  
     }
+    cout<<b.max_routers<<" "<<b.k<<" "<<b.F<<endl;
 }
 
 
@@ -665,11 +720,12 @@ base_learner* log_time_multi_label_tree_setup(vw& all)
         init_learner(&tree, setup_base(all), learn, predict, tree.max_routers+tree.k,
                     prediction_type::multilabels);
     
+    //srand(time(0));
     l.set_save_load(save_load_tree);
     l.set_finish_example(finish_example);
     l.set_finish(finish); 
     all.p->lp = MULTILABEL::multilabel;
     all.label_type = label_type::multi;
-    all.delete_prediction = MULTILABEL::multilabel.delete_label;
+    //all.delete_prediction = MULTILABEL::multilabel.delete_label;
     return make_base(l);
 }
