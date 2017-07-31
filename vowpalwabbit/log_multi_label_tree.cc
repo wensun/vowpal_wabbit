@@ -463,7 +463,7 @@ void predict(log_multi_label_tree& b, base_learner& base, example& ec){
 
 void learn(log_multi_label_tree& b, base_learner& base, example& ec){
     b.num_ecs ++;
-    if (b.num_ecs <= 1186239*2){
+    if (b.num_ecs <= 623847*3){
     
     //if (b.test_flag == false){
         predict(b, base, ec);

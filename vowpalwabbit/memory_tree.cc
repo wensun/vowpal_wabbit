@@ -632,7 +632,7 @@ namespace memory_tree_ns
                     diag_kronecker_product(ec, *b.examples[loc], *kprod_ec);
                     kprod_ec->l.simple = {-1., 1., 0.};
                     base.predict(*kprod_ec, b.max_routers);
-                    score = kprod_ec->pred.scalar;
+                    score = kprod_ec->partial_prediction;
                     free_example(kprod_ec);
                 }
                 else
