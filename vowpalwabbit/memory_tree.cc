@@ -209,13 +209,14 @@ namespace memory_tree_ns
 
     ////Implement kronecker_product between two examples:
     //kronecker_prod at feature level:
-    void diag_kronecker_prod_fs(features& f1, features& f2, float& total_sum_feat_sq)
+    void diag_kronecker_prod_fs(features& f1, features& f2, float& total_sum_feat_sq, float norm_sq1, float norm_sq2)
     {
         for (size_t i1 = 0; i1 < f1.indicies.size(); i1++){
             size_t i2 = 0;
             for (i2 = 0; i2 < f2.indicies.size(); i2++){
                 if (f1.indicies[i1] == f2.indicies[i2]){
                     f1.values[i1] *= f2.values[i2];
+                    f1.values[i1] = f1.values[i1] / pow(norm_sq1*norm_sq2, 0.5);
                     total_sum_feat_sq += pow(f1.values[i1],2);
                     //cout<<"in the same indices..."<<endl;
                     break;
@@ -235,7 +236,7 @@ namespace memory_tree_ns
         for(namespace_index c : ec.indices){
             for(namespace_index c2 : ec2.indices){
                 if (c == c2)
-                    diag_kronecker_prod_fs(ec.feature_space[c], ec2.feature_space[c2], ec.total_sum_feat_sq);
+                    diag_kronecker_prod_fs(ec.feature_space[c], ec2.feature_space[c2], ec.total_sum_feat_sq, ec1.total_sum_feat_sq, ec2.total_sum_feat_sq);
             }
         }
     }
@@ -490,9 +491,13 @@ namespace memory_tree_ns
             }
         }
 
-        int loc_at_leaf = int(merand48(b.all->random_state)*b.nodes[cn].examples_index.size());
-        pop_at_index(b.nodes[cn].examples_index, loc_at_leaf); 
-        return loc_at_leaf;
+        if (b.nodes[cn].examples_index.size() >= 1){
+            int loc_at_leaf = int(merand48(b.all->random_state)*b.nodes[cn].examples_index.size());
+            pop_at_index(b.nodes[cn].examples_index, loc_at_leaf); 
+            return loc_at_leaf;
+        }
+        else    
+            return -1;
     }
 
 
@@ -629,7 +634,8 @@ namespace memory_tree_ns
                     diag_kronecker_product(ec, *b.examples[loc], *kprod_ec);
                     kprod_ec->l.simple = {-1., 1., 0.};
                     base.predict(*kprod_ec, b.max_routers);
-                    score = kprod_ec->pred.scalar;
+                    //score = kprod_ec->pred.scalar;
+                    score = kprod_ec->partial_prediction;
                     free_example(kprod_ec);
                 }
                 else
@@ -656,7 +662,8 @@ namespace memory_tree_ns
             if (ec.l.multi.label == b.examples[loc]->l.multi.label) //reward = 1:    
                 kprod_ec->l.simple = {1., 1., 0.};
             else
-                kprod_ec->l.simple = {-1., 1., 0.}; //reward = 0:
+                //kprod_ec->l.simple = {-1., 1., 0.}; //reward = 0:
+                kprod_ec->l.simple = {0., 1., 0.};
         
             
             base.learn(*kprod_ec, b.max_routers);
@@ -669,13 +676,7 @@ namespace memory_tree_ns
         example& ec = calloc_or_throw<example>();
         //ec = *b.examples[b.iter];
         copy_example_data(&ec, &test_ec);
-        remove_repeat_features_in_ec(ec);
-        /*
-        size_t ss = b.all->weights.stride_shift();
-        for (auto nc : ec.indices){
-            for (size_t i = 0; i < ec.feature_space[nc].indicies.size(); i++)
-                ec.feature_space[nc].indicies[i] = (ec.feature_space[nc].indicies[i]<<ss);  //>>
-        }*/
+        //remove_repeat_features_in_ec(ec);
         
         MULTICLASS::label_t mc = ec.l.multi;
         uint32_t save_multi_pred = ec.pred.multiclass;
@@ -708,14 +709,11 @@ namespace memory_tree_ns
             b.num_mistakes++;
         }
         free_example(&ec);
-        //example* tmp_ec = &calloc_or_throw<example>();
-        //tmp_ec = &ec;
-        //free(tmp_ec);
     }
 
     //node here the ec is already stored in the b.examples, the task here is to rout it to the leaf, 
     //and insert the ec_array_index to the leaf.
-    void insert_example(memory_tree& b, base_learner& base, const uint32_t& ec_array_index)
+    void insert_example(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, bool fake_insert = false)
     {
         uint32_t cn = 0; //start from the root.
         while(b.nodes[cn].internal == 1) //if it's internal node:
@@ -725,8 +723,7 @@ namespace memory_tree_ns
             uint32_t newcn = descent(b.nodes[cn], router_pred); //updated nr or nl
             cn = newcn; 
         }
-
-        if(b.nodes[cn].internal == -1) //get to leaf:
+        if((b.nodes[cn].internal == -1) && (fake_insert == false)) //get to leaf:
         {   
             b.nodes[cn].examples_index.push_back(ec_array_index);
             if (b.nodes[cn].examples_index.size() > b.max_ex_in_leaf)
@@ -747,16 +744,21 @@ namespace memory_tree_ns
                 }
             }
         }
+        else if((b.nodes[cn].internal == -1) && (fake_insert == true))
+            learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]); 
     }
 
     void experience_replay(memory_tree& b, base_learner& base)
     {
         uint32_t cn = 0; //start from root, randomly descent down! 
         int loc_at_leaf = random_sample_example_pop(b, cn);
-        uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf]; //ec_id is the postion of the sampled example in b.examples. 
-        //re-insert:note that we do not have to 
-        //restore the example into b.examples, as it's alreay there
-        insert_example(b, base, ec_id); 
+        if (loc_at_leaf >= 0){
+            uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf]; //ec_id is the postion of the sampled example in b.examples. 
+            //re-insert:note that we do not have to 
+            //restore the example into b.examples, as it's alreay there
+            insert_example(b, base, ec_id); 
+        }
+
     }
 
     //learn: descent the example from the root while generating binary training
@@ -771,10 +773,19 @@ namespace memory_tree_ns
 
             example* new_ec = &calloc_or_throw<example>();
             copy_example_data(new_ec, &ec);
-            remove_repeat_features_in_ec(*new_ec); ////sort unique.
+            //remove_repeat_features_in_ec(*new_ec); ////sort unique.
             b.examples.push_back(new_ec);   
             b.num_ecs++; 
-            insert_example(b, base, b.num_ecs-1);
+
+            float random_prob = merand48(b.all->random_state);
+            if (random_prob < 1.)
+                insert_example(b, base, b.examples.size()-1);
+            else{
+                insert_example(b, base, b.examples.size()-1, true);
+                b.num_ecs--;
+                free_example(new_ec);
+                b.examples.pop();
+            }
             //if (b.iter % 1 == 0)
             for (int i = 0; i < 1; i++)
                 experience_replay(b, base);   
