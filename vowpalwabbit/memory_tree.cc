@@ -211,19 +211,30 @@ namespace memory_tree_ns
     //kronecker_prod at feature level:
     void diag_kronecker_prod_fs(features& f1, features& f2, float& total_sum_feat_sq, float norm_sq1, float norm_sq2)
     {
+        v_array<feature_index> tmp_f2_indicies = v_init<feature_index>();
+        copy_array(tmp_f2_indicies, f2.indicies);
         for (size_t i1 = 0; i1 < f1.indicies.size(); i1++){
             size_t i2 = 0;
             for (i2 = 0; i2 < f2.indicies.size(); i2++){
                 if (f1.indicies[i1] == f2.indicies[i2]){
-                    f1.values[i1] *= f2.values[i2];
-                    f1.values[i1] = f1.values[i1] / pow(norm_sq1*norm_sq2, 0.5);
+                    f1.values[i1] = f1.values[i1]*f2.values[i2]/pow(norm_sq1*norm_sq2,0.5) - abs(f1.values[i1]/pow(norm_sq1,0.5) - f2.values[i2]/pow(norm_sq2,0.5));
+                    //f1.values[i1] = f1.values[i1]*f2.values[i2] / pow(norm_sq1*norm_sq2, 0.5);
                     total_sum_feat_sq += pow(f1.values[i1],2);
-                    //cout<<"in the same indices..."<<endl;
+                    tmp_f2_indicies[i2] = 0;
                     break;
                 }
             }
             if (i2 == f2.indicies.size()){ //f1's index does not appear in f2, namely value of the index in f2 is zero.
-                f1.values[i1] = 0.0;
+                //f1.values[i1] = 0.0;
+                f1.values[i1] = 0.0 - abs(f1.values[i1]/pow(norm_sq1,0.5));
+                total_sum_feat_sq += pow(f1.values[i1],2);
+            }
+        }
+        for (size_t i2 = 0; i2 < tmp_f2_indicies.size(); i2++){
+            if (tmp_f2_indicies[i2] != 0){
+                float value = 0.0 - abs(f2.values[i2]/pow(norm_sq2,0.5));
+                f1.push_back(value, f2.indicies[i2]);
+                total_sum_feat_sq += pow(value, 2);
             }
         }
     }
@@ -509,8 +520,7 @@ namespace memory_tree_ns
         //note: here we first train the router and then predict.
         MULTICLASS::label_t mc = ec.l.multi;
         uint32_t save_multi_pred = ec.pred.multiclass;
-        ec.l.simple.label = 1.;
-
+        ec.l.simple = {1.f, 1.f, 0.};
         base.predict(ec, b.nodes[cn].base_router);
         float prediction = ec.pred.scalar; 
         float imp_weight = 1.f; //no importance weight.
@@ -550,7 +560,6 @@ namespace memory_tree_ns
             b.max_depth = b.nodes[cn].depth + 1;
         //cout<<b.max_depth<<endl;
 
-
         b.nodes[cn].left = left_child;
         b.nodes[cn].right = right_child;
         b.nodes[left_child].parent = cn;
@@ -567,8 +576,7 @@ namespace memory_tree_ns
             uint32_t ec_pos = b.nodes[cn].examples_index[ec_id];
             MULTICLASS::label_t mc = b.examples[ec_pos]->l.multi;
             uint32_t save_multi_pred = b.examples[ec_pos]->pred.multiclass;
-            b.examples[ec_pos]->l.simple.label = 1.;
-
+            b.examples[ec_pos]->l.simple = {1.f, 1.f, 0.f};
             base.predict(*b.examples[ec_pos], b.nodes[cn].base_router); //re-predict
             float scalar = b.examples[ec_pos]->pred.scalar;
             if (scalar < 0)
@@ -662,8 +670,8 @@ namespace memory_tree_ns
             if (ec.l.multi.label == b.examples[loc]->l.multi.label) //reward = 1:    
                 kprod_ec->l.simple = {1., 1., 0.};
             else
-                //kprod_ec->l.simple = {-1., 1., 0.}; //reward = 0:
-                kprod_ec->l.simple = {0., 1., 0.};
+                kprod_ec->l.simple = {-1., 1., 0.}; //reward = 0:
+                //kprod_ec->l.simple = {0., 1., 0.};
         
             
             base.learn(*kprod_ec, b.max_routers);
@@ -681,8 +689,7 @@ namespace memory_tree_ns
         MULTICLASS::label_t mc = ec.l.multi;
         uint32_t save_multi_pred = ec.pred.multiclass;
         uint32_t cn = 0;
-        ec.l.simple.label = -1;
-        
+        ec.l.simple = {-1.f, 1.f, 0.};
         while(b.nodes[cn].internal == 1) //if it's internal
         {
             //cout<<"at node "<<cn<<endl;
@@ -723,6 +730,10 @@ namespace memory_tree_ns
             uint32_t newcn = descent(b.nodes[cn], router_pred); //updated nr or nl
             cn = newcn; 
         }
+        //at leaf, use available information at leaf to train regressor/classifier at leaf.
+        if ((b.nodes[cn].internal == -1) && (b.learn_at_leaf == true))
+            learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]);
+
         if((b.nodes[cn].internal == -1) && (fake_insert == false)) //get to leaf:
         {   
             b.nodes[cn].examples_index.push_back(ec_array_index);
@@ -738,14 +749,14 @@ namespace memory_tree_ns
             if((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size() + 2 <= b.max_nodes)){
                 split_leaf(b, base, cn); 
             }
-            else{
-                if (b.learn_at_leaf == true){
-	                learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]);  //learn similarity function at leafb.l
-                }
-            }
+            //else{
+            //    if (b.learn_at_leaf == true){
+	        //        learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]);  //learn similarity function at leafb.l
+            //    }
+            //}
         }
-        else if((b.nodes[cn].internal == -1) && (fake_insert == true))
-            learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]); 
+        //else if((b.nodes[cn].internal == -1) && (fake_insert == true))
+        //    learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]); 
     }
 
     void experience_replay(memory_tree& b, base_learner& base)

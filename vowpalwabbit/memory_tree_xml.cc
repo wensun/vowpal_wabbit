@@ -35,13 +35,16 @@ namespace memory_tree_xml_ns
         return;
     }
 
-    void copy_example_data(example* dst, example* src, bool no_feat = false)
+    inline void copy_example_data(example* dst, const example* src, bool no_multilabel = false, bool no_feat = false)
     { 
-        dst->l = src->l;
-        dst->l.multilabels = src->l.multilabels;
+        //if (!no_multilabel){
+            //dst->l.multilabels = src->l.multilabels;
         copy_array(dst->l.multilabels.label_v, src->l.multilabels.label_v);
-        //dst->l.multi.label = src->l.multi.label;
-        //dst->l.multilabels.label_v = src->l.multilabels.label_v;
+        //}
+        //else{
+        //    dst->l = src->l;
+            //dst->l.multi.label = src->l.multi.label;
+        //}
 
         copy_array(dst->tag, src->tag);
         dst->example_counter = src->example_counter;
@@ -49,8 +52,9 @@ namespace memory_tree_xml_ns
 
         if (no_feat == false){
             copy_array(dst->indices, src->indices);
-            for (namespace_index c : src->indices)
-                dst->feature_space[c].deep_copy_from(src->feature_space[c]);
+            for (size_t t = 0; t < src->indices.size(); t++)
+            //for (namespace_index c : src->indices)
+                dst->feature_space[src->indices[t]].deep_copy_from(src->feature_space[src->indices[t]]);
             dst->ft_offset = src->ft_offset;
 
             dst->num_features = src->num_features;
@@ -74,7 +78,6 @@ namespace memory_tree_xml_ns
 
     inline void free_example(example* ec)
     {
-        ec->l.multilabels.label_v.delete_v();
         ec->tag.delete_v();
         if (ec->passthrough){
             ec->passthrough->delete_v();
@@ -84,7 +87,6 @@ namespace memory_tree_xml_ns
         ec->indices.delete_v();
         free(ec);
     }
-
 
     void remove_repeat_features_in_f(features& f)
     {
@@ -111,122 +113,34 @@ namespace memory_tree_xml_ns
             remove_repeat_features_in_f(ec.feature_space[nc]);
     }
 
-    //f = f1 - f2
-    void subtract_features(features& f1, features& f2, features& f)
-    {//f1 and f2 are features under the same namespace
-        f.deep_copy_from(f1);
-        //now scan through f2's indices, check if the index is in f1's indices:
-        for (size_t i = 0; i < f2.indicies.size(); i++){
-            uint64_t ind_f2 = f2.indicies[i];
-            float val_f2 = f2.values[i];
-            uint64_t pos = 0;
-            for (pos = 0; pos < f.indicies.size(); pos++)
-            {
-                if (ind_f2 == f.indicies[pos]) //the feature index of f2 is also in f1, then we subtract:
-                {
-                    f.values[pos] -= val_f2;
-                    break;
-                }
-            }
-            if (pos == f.indicies.size()) //this feature index of f2 is not in f1,  then push back (0-val), as we are doing f1-f2.
-                f.push_back(0. - val_f2, ind_f2); 
-        }
-    }
-
-
-    //ec1 - ec2
-    void subtract_two_examples(example& ec1, example& ec2, example* subtracted_ec)
-    {
-        //copy tag from ec1 and ec2:
-        copy_array(subtracted_ec->tag, ec1.tag);
-        for (auto tag: ec2.tag)  //char
-        {
-	  size_t i = 0;
-            for(i = 0; i < subtracted_ec->tag.size(); i++){
-                if (tag == subtracted_ec->tag[i]) 
-                    break;
-            }
-            if (i == subtracted_ec->tag.size())
-                subtracted_ec->tag.push_back(tag);
-        }
-        //copy indices (different indices, no repeat)
-        copy_array(subtracted_ec->indices, ec1.indices);
-        for (auto c : ec2.indices){ //char: namespace_index
-            size_t i = 0;
-            for (i = 0; i < subtracted_ec->indices.size(); i++){
-                if (c == subtracted_ec->indices[i])
-                    break;
-            }
-            if (i == subtracted_ec->indices.size())
-                subtracted_ec->indices.push_back(c);
-        }
-        //copy features (f1 - f2) 
-        subtracted_ec->ft_offset = ec1.ft_offset; //0
-        subtracted_ec->num_features = 0;
-        subtracted_ec->total_sum_feat_sq = 0; 
-        for (auto c : subtracted_ec->indices) //namespace index:
-        {
-            //cout<<"at "<<c<<endl;
-            size_t pos1 = 0;
-            for (pos1 = 0; pos1 < ec1.indices.size(); pos1++){
-                if (c == ec1.indices[pos1])
-                    break;
-            }
-            size_t pos2 = 0;
-            for (pos2 = 0; pos2 < ec2.indices.size(); pos2++){
-                if (c == ec2.indices[pos2])
-                    break;
-            }
-
-            if ((pos1 < ec1.indices.size()) && (pos2 < ec2.indices.size())) //common name space:
-                subtract_features(ec1.feature_space[c], ec2.feature_space[c], subtracted_ec->feature_space[c]);
-            else if ((pos1 < ec1.indices.size()) && (pos2 == ec2.indices.size())) //f1 has this a name space that doesn't exist in f2:
-                subtracted_ec->feature_space[c].deep_copy_from(ec1.feature_space[c]);
-            else if ((pos1 == ec1.indices.size()) && (pos2 < ec2.indices.size())){
-                subtracted_ec->feature_space[c].deep_copy_from(ec2.feature_space[c]);
-                //negate the values
-                for (size_t t = 0; t < subtracted_ec->feature_space[c].values.size(); t++)
-                    subtracted_ec->feature_space[c].values[t] *= -1.;
-            }
-            subtracted_ec->num_features += subtracted_ec->feature_space[c].indicies.size();
-
-            //update total_feature_square
-            for (size_t v = 0; v < subtracted_ec->feature_space[c].values.size(); v++){
-                subtracted_ec->total_sum_feat_sq += pow(subtracted_ec->feature_space[c].values[v],2);
-                //cout<<pow(subtracted_ec->feature_space[c].values[v],2)<<endl;
-            }
-        }
-
-        //otherstuff:
-        subtracted_ec->partial_prediction = 0.0;
-        subtracted_ec->passthrough = nullptr;
-        subtracted_ec->loss = 0.;
-        subtracted_ec->weight = ec1.weight;
-        subtracted_ec->confidence = ec1.confidence;
-        subtracted_ec->test_only = ec1.test_only;
-        subtracted_ec->end_pass = ec1.end_pass;
-        subtracted_ec->sorted = false;
-        subtracted_ec->in_use = false;
-    }
-
-
     ////Implement kronecker_product between two examples:
     //kronecker_prod at feature level:
     void diag_kronecker_prod_fs(features& f1, features& f2, float& total_sum_feat_sq, float norm_sq1, float norm_sq2)
     {
+        v_array<feature_index> tmp_f2_indicies = v_init<feature_index>();
+        copy_array(tmp_f2_indicies, f2.indicies);
         for (size_t i1 = 0; i1 < f1.indicies.size(); i1++){
             size_t i2 = 0;
             for (i2 = 0; i2 < f2.indicies.size(); i2++){
                 if (f1.indicies[i1] == f2.indicies[i2]){
-                    f1.values[i1] *= f2.values[i2];
-                    f1.values[i1] = f1.values[i1] / pow(norm_sq1*norm_sq2, 0.5);
+                    f1.values[i1] = f1.values[i1]*f2.values[i2]/pow(norm_sq1*norm_sq2,0.5) - abs(f1.values[i1]/pow(norm_sq1,0.5) - f2.values[i2]/pow(norm_sq2,0.5));
+                    //f1.values[i1] = f1.values[i1]*f2.values[i2] / pow(norm_sq1*norm_sq2, 0.5);
                     total_sum_feat_sq += pow(f1.values[i1],2);
-                    //cout<<"in the same indices..."<<endl;
+                    tmp_f2_indicies[i2] = 0;
                     break;
                 }
             }
             if (i2 == f2.indicies.size()){ //f1's index does not appear in f2, namely value of the index in f2 is zero.
-                f1.values[i1] = 0.0;
+                //f1.values[i1] = 0.0;
+                f1.values[i1] = 0.0 - abs(f1.values[i1]/pow(norm_sq1,0.5));
+                total_sum_feat_sq += pow(f1.values[i1],2);
+            }
+        }
+        for (size_t i2 = 0; i2 < tmp_f2_indicies.size(); i2++){
+            if (tmp_f2_indicies[i2] != 0){
+                float value = 0.0 - abs(f2.values[i2]/pow(norm_sq2,0.5));
+                f1.push_back(value, f2.indicies[i2]);
+                total_sum_feat_sq += pow(value, 2);
             }
         }
     }
@@ -234,12 +148,13 @@ namespace memory_tree_xml_ns
     void diag_kronecker_product(example& ec1, example& ec2, example& ec)
     {
         //ec <= ec1 X ec2
-        copy_example_data(&ec, &ec1);
+        copy_example_data(&ec, &ec1, false, false);
         ec.total_sum_feat_sq = 0.0;
         for(namespace_index c : ec.indices){
             for(namespace_index c2 : ec2.indices){
-                if (c == c2)
+                if (c == c2){
                     diag_kronecker_prod_fs(ec.feature_space[c], ec2.feature_space[c2], ec.total_sum_feat_sq, ec1.total_sum_feat_sq, ec2.total_sum_feat_sq);
+                }
             }
         }
     }
@@ -258,19 +173,6 @@ namespace memory_tree_xml_ns
             }
         }
     }
-
-    //void kronecker_product(example& ec1, example& ec2, example& ec, uint64_t mask, size_t ss)
-    //{
-        //copy_example_data(&ec, &ec1);
-    //    ec.indices.push_back(node_id_namespace);
-    //    ec.total_sum_feat_sq = 0.0;
-    //    for (namespace_index c1 : ec1.indices){
-    //        for (namespace_index c2 : ec2.indices){
-    //            if (c1 == c2)
-    //                kronecker_product_f(ec1.feature_space[c1], ec2.feature_space[c2], ec.feature_space[node_id_namespace], ec.total_sum_feat_sq, ec.num_features, mask, ss);
-    //        }
-    //    }
-    //}
 
     void kronecker_product(example& ec1, example& ec2, example& ec)
     {
@@ -360,8 +262,6 @@ namespace memory_tree_xml_ns
     };
 
 
-
-
     //memory_tree
     struct memory_tree
     {
@@ -383,7 +283,7 @@ namespace memory_tree_xml_ns
 
         bool path_id_feat;
 
-        uint32_t num_mistakes;
+        float num_mistakes;
         uint32_t num_ecs;
         uint32_t num_test_ecs;
         uint32_t test_mistakes;
@@ -391,23 +291,22 @@ namespace memory_tree_xml_ns
 
         bool test_mode;
 
+        int K;
 
-
-
-        memory_tree()
-        {
+        memory_tree(){
             nodes = v_init<node>();
             examples = v_init<example*>();
             alpha = 0.5;
             routers_used = 0;
             iter = 0;
-            num_mistakes = 0;
+            num_mistakes = 0.;
             num_ecs = 0;
             num_test_ecs = 0;
             path_id_feat = false;
             test_mode = false;
             max_depth = 0;
             max_ex_in_leaf = 0;
+            K = 1;
         }
     };
 
@@ -439,32 +338,18 @@ namespace memory_tree_xml_ns
      return dotprod;
    }
 
-    float compute_l2_distance(memory_tree& b, example* ec1, example* ec2)
-    {
-        flat_example* fec1 = flatten_sort_example(*b.all, ec1);
-        flat_example* fec2 = flatten_sort_example(*b.all, ec2);
-        float linear_prod = linear_kernel(fec1, fec2);
-        float l2_dis = 1. + 1. - 2.*linear_prod/pow(fec1->total_sum_feat_sq*fec2->total_sum_feat_sq, 0.5);
-        fec1->fs.delete_v(); 
-        fec2->fs.delete_v();
-        free(fec1);
-        free(fec2);
-        return l2_dis;
-    }
     float inner_prod(memory_tree& b, example* ec1, example* ec2)
     {
         flat_example* fec1 = flatten_sort_example(*b.all, ec1);
         flat_example* fec2 = flatten_sort_example(*b.all, ec2);
         float linear_prod = linear_kernel(fec1, fec2);
-        linear_prod/= pow(fec1->total_sum_feat_sq*fec2->total_sum_feat_sq, 0.5);
+        linear_prod /= pow(fec1->total_sum_feat_sq*fec2->total_sum_feat_sq, 0.5);
         fec1->fs.delete_v(); 
         fec2->fs.delete_v();
         free(fec1);
         free(fec2);
-        return l2_dis;
+        return linear_prod;
     }
-
-
 
     void init_tree(memory_tree& b)
     {
@@ -478,21 +363,19 @@ namespace memory_tree_xml_ns
         cout<<"tree initiazliation is done...."<<endl
             <<"max nodes "<<b.max_nodes<<endl
             <<"tree size: "<<b.nodes.size()<<endl
-            <<"learn at leaf: "<<b.learn_at_leaf<<endl;
+            <<"learn at leaf: "<<b.learn_at_leaf<<endl
+            <<"alpha: "<<b.alpha<<endl;
     }
-
 
     //rout based on the prediction
     inline uint32_t descent(node& n, const float prediction)
     { 
         //prediction <0 go left, otherwise go right
-        if(prediction < 0)
-        {
+        if(prediction < 0){
             n.nl++; //increment the number of examples routed to the left.
             return n.left;
         }
-        else //otherwise go right.
-        {
+        else{ //otherwise go right.
             n.nr++; //increment the number of examples routed to the right.
             return n.right; 
         }
@@ -544,24 +427,27 @@ namespace memory_tree_xml_ns
         //predict, learn and predict
         //note: here we first train the router and then predict.
         //MULTICLASS::label_t mc = ec.l.multi;
-        //uint32_t save_multi_pred = ec.pred.multiclass;
+        //uint32_t save_multi_pred = ec.pred.scalar;
         MULTILABEL::labels multilabels = ec.l.multilabels;
         MULTILABEL::labels preds = ec.pred.multilabels;
-        ec.l.simple.label = 1.;
-
+        //ec.l.simple.label = 1.;
+        ec.l.simple = {1.f, 1.f, 0.f};
         base.predict(ec, b.nodes[cn].base_router);
         float prediction = ec.pred.scalar; 
         float imp_weight = 1.f; //no importance weight.
         
-        double weighted_value = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr)/log(2.)+b.alpha*prediction;
+        double weighted_value = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr*1.)/log(2.)+b.alpha*prediction;
+        //b.nodes[cn].nl/b.nodes[cn].nr<<" "<<" "<<prediction<<" "<<weighted_value<<endl;
         float route_label = weighted_value < 0.f ? -1.f : 1.f;
         
-
         ec.l.simple = {route_label, imp_weight, 0.f};
         base.learn(ec, b.nodes[cn].base_router); //update the router according to the new example.
         
         base.predict(ec, b.nodes[cn].base_router);
-        float save_binary_scalar = ec.pred.scalar;
+        float save_binary_scalar = ec.partial_prediction;
+        save_binary_scalar = ec.pred.scalar;
+        //cout<<ec.partial_prediction<<" "<<ec.pred.scalar<<endl;
+        //float save_binary_scalar = ec.pred.scalar;
 
         ec.pred.multilabels = preds;
         ec.l.multilabels = multilabels;
@@ -590,7 +476,6 @@ namespace memory_tree_xml_ns
             b.max_depth = b.nodes[cn].depth + 1;
         //cout<<b.max_depth<<endl;
 
-
         b.nodes[cn].left = left_child;
         b.nodes[cn].right = right_child;
         b.nodes[left_child].parent = cn;
@@ -609,8 +494,7 @@ namespace memory_tree_xml_ns
             MULTILABEL::labels preds = b.examples[ec_pos]->pred.multilabels;
             //MULTICLASS::label_t mc = b.examples[ec_pos]->l.multi;
             //uint32_t save_multi_pred = b.examples[ec_pos]->pred.multiclass;
-            b.examples[ec_pos]->l.simple.label = 1.;
-
+            b.examples[ec_pos]->l.simple = {1.f, 1.f, 0.f};
             base.predict(*b.examples[ec_pos], b.nodes[cn].base_router); //re-predict
             float scalar = b.examples[ec_pos]->pred.scalar;
             if (scalar < 0)
@@ -637,29 +521,12 @@ namespace memory_tree_xml_ns
         if (std::max(b.nodes[cn].nl, b.nodes[cn].nr) > b.max_ex_in_leaf)
         {
             b.max_ex_in_leaf = std::max(b.nodes[cn].nl, b.nodes[cn].nr);
-            cout<<b.max_ex_in_leaf<<endl;
+            cout<<"max_ex_in_leaf: "<<b.max_ex_in_leaf<<" at node "<<cn<<endl;
         }
 
     }
     
-    //add path feature:
-    void add_node_id_feature (memory_tree& b, uint32_t cn, example& ec)
-    {
-        vw* all = b.all;
-        uint64_t mask = all->weights.mask();
-        size_t ss = all->weights.stride_shift();
-
-        ec.indices.push_back (node_id_namespace);
-        features& fs = ec.feature_space[node_id_namespace];
-
-        while (cn > 0)
-        { 
-            fs.push_back (1., ((868771 * cn) << ss) & mask);
-            cn = b.nodes[cn].parent;
-        }
-    }
-
-
+    /*
     //pick up the "closest" example in the leaf using the score function.
     int64_t pick_nearest(memory_tree& b, base_learner& base, const uint32_t cn, example& ec)
     {
@@ -694,51 +561,54 @@ namespace memory_tree_xml_ns
         }
         else
             return -1;
-    }
+    }*/
 
     void compute_scores_labels(memory_tree& b, base_learner& base, 
             const uint32_t cn, example& ec, int K, v_array<uint32_t>& top_K_labs)
     {   
         top_K_labs.delete_v();
         top_K_labs = v_init<uint32_t>();
-        v_array<score_label> score_labs =  v_init<score_label>();
-        if (b.nodes[cn].examples_index.size() > 0){
-            for(size_t i = 0; i < b.nodes[cn].examples_index.size(); i++){
-                float score = 0.f;
-                uint32_t loc = b.nodes[cn].examples_index[i];
-                if (b.learn_at_leaf == true){
-                    example* kprod_ec = &calloc_or_throw<example>();
-                    diag_kronecker_product(ec, *b.examples[loc], *kprod_ec);
-                    kprod_ec->l.simple = {-1., 1., 0.};
-                    base.predict(*kprod_ec, b.max_routers);
-                    score = kprod_ec->partial_prediction;
-                    free_example(kprod_ec);
-                }
-                else
-                    score = inner_prod(b, &ec, b.examples[loc]); 
+        v_array<score_label> score_labs = v_init<score_label>();
+        if (b.nodes[cn].examples_index.size() == 0){
+            return;
+        }
+        
+        for(size_t i = 0; i < b.nodes[cn].examples_index.size(); i++){
+            float score = 0.f; //the similarity with respect to ec.
+            uint32_t loc = b.nodes[cn].examples_index[i];
+            if (b.learn_at_leaf == true){
+                example* kprod_ec = &calloc_or_throw<example>();
 
-                //insert labels:
-                for (uint32_t lab : b.examples[loc]->l.multilabels.label_v){
-                    bool in = false;
-                    for (score_label& s_l : score_labs){
-                        if (lab == s_l.label){
-                            s_l.score += score;
-                            in = true;
-                            break
-                        }
+                diag_kronecker_product(ec, *b.examples[loc], *kprod_ec);
+                kprod_ec->l.simple = {1.f, 1., 0.};
+                base.predict(*kprod_ec, b.max_routers);
+                score = kprod_ec->partial_prediction;
+                free_example(kprod_ec);
+            } 
+            else
+                score = inner_prod(b, &ec, b.examples[loc]); 
+
+            //insert labels:
+            for (uint32_t lab : b.examples[loc]->l.multilabels.label_v){
+                bool in = false;
+                for (score_label& s_l : score_labs){
+                    if (lab == s_l.label){ //this lab is in score_labs array
+                        s_l.score += exp(5*(score-1.));
+                        in = true;
+                        break;
                     }
-                    if (in == false)
-                        score_labs.push_back(score_label(lab, score));   
                 }
+                if (in == false)
+                    score_labs.push_back(score_label(lab, score));   
             }
         }
         //get the top K ranked labels:
-        if (score_labs.size() <= K){
+        if (score_labs.size() <= K){ //if less than K:
             for (auto l_s : score_labs)
                 top_K_labs.push_back(l_s.label);
         }
         else{
-            for (int pass = 0; pass < K; pass++){
+            for (int pass = 0; pass < K; pass++){ //~O(Klog(N))
                 uint32_t max_lab_loc = 0;
                 float max_score = -FLT_MAX;
                 for (size_t i = 0; i < score_labs.size(); i++){
@@ -752,8 +622,8 @@ namespace memory_tree_xml_ns
                 score_labs[max_lab_loc].score = -FLT_MAX; 
             }
         }
+        //score_labs.delete_v();
     }
-
 
     template<typename T> 
     inline bool in_v_array(const v_array<T>& array, const T& item, uint32_t& pos){
@@ -775,7 +645,7 @@ namespace memory_tree_xml_ns
             if (in_v_array(array_2, item1, pos) == true)
                 num_overlap++;
         }
-        return over_lap;
+        return num_overlap;
     }
 
     void learn_similarity_at_leaf(memory_tree& b, base_learner& base, const uint32_t cn, example& ec)
@@ -786,64 +656,79 @@ namespace memory_tree_xml_ns
         {
             example* ec_loc = b.examples[loc];
             example* kprod_ec = &calloc_or_throw<example>();
+
             diag_kronecker_product(ec, *ec_loc, *kprod_ec);
-            //if (ec.l.multi.label == b.examples[loc]->l.multi.label) //reward = 1:    
+
+            MULTILABEL::labels k_multilabels = kprod_ec->l.multilabels;
+            MULTILABEL::labels k_preds = kprod_ec->pred.multilabels;
+        
             int num_overlap = over_lap(b.examples[loc]->l.multilabels.label_v, ec.l.multilabels.label_v);
+            
             if (num_overlap > 0)
-                kprod_ec->l.simple = {1., 1.*num_overlap, 0.}; //weighted based on the number of overlap items.
+                kprod_ec->l.simple = {1.f, float(1.*num_overlap), 0.}; //weighted based on the number of overlap items.
             else
                 //kprod_ec->l.simple = {-1., 1., 0.}; //reward = 0:
-                kprod_ec->l.simple = {0., 1., 0.};
-        
+                kprod_ec->l.simple = {0.f, 1.f, 0.};
+    
             base.learn(*kprod_ec, b.max_routers);
+
+
+            ec.pred.multilabels = preds;
+            ec.l.multilabels = multilabels;
+
+            kprod_ec->pred.multilabels = k_preds;
+            kprod_ec->l.multilabels = k_multilabels; 
+            
             free_example(kprod_ec);
+            
         }
-        ec.pred.multilabels = preds;
-        ec.l.multilabels = multilabels;
+    } 
+
+    inline float compute_precision_at_K(example& ec){
+        float pk_score = 0;
+        uint32_t tmp_pos = 0;
+        for (uint32_t label : ec.pred.multilabels.label_v){
+            if (in_v_array(ec.l.multilabels.label_v, label, tmp_pos))
+                pk_score++;
+        }
+        if (ec.pred.multilabels.label_v.size() == 0)
+            pk_score = 0;
+        else
+            pk_score /= (ec.pred.multilabels.label_v.size()*1.);
+        
+        return pk_score;
     }
 
-    void predict(memory_tree& b, base_learner& base, example& test_ec)
+    void predict(memory_tree& b, base_learner& base, example& ec)
     {
-        example& ec = calloc_or_throw<example>();
-        copy_example_data(&ec, &test_ec);
+        //example& ec = calloc_or_throw<example>();
+        //copy_example_data(&ec, &test_ec);
         //remove_repeat_features_in_ec(ec);
         
-        //MULTICLASS::label_t mc = ec.l.multi;
-        //uint32_t save_multi_pred = ec.pred.multiclass;
         MULTILABEL::labels multilabels = ec.l.multilabels;
         MULTILABEL::labels preds = ec.pred.multilabels;
         uint32_t cn = 0;
-        ec.l.simple.label = -1;
-        
+        ec.l.simple = {1., 1.f, 0.f};
         while(b.nodes[cn].internal == 1) //if it's internal
         {
             base.predict(ec, b.nodes[cn].base_router);
             uint32_t newcn = ec.pred.scalar < 0 ? b.nodes[cn].left : b.nodes[cn].right; //do not need to increment nl and nr.
             cn = newcn;
         }
+        ec.pred.multilabels = preds; 
         ec.l.multilabels = multilabels;
-        ec.pred.multiclass = max_label; 
-        //ec.l.multi = mc; 
-        //ec.pred.multiclass = save_multi_pred;
 
-        int64_t closest_ec = pick_nearest(b, base, cn, ec);
-        if (closest_ec != -1){
-            
-
-
-            ec.pred.multiclass = b.examples[closest_ec]->l.multi.label;
-            test_ec.pred.multiclass = b.examples[closest_ec]->l.multi.label;
-            if(test_ec.pred.multiclass != test_ec.l.multi.label)
-            {
-                test_ec.loss = test_ec.weight; //weight in default is 1.
-                b.num_mistakes++;
-            }
-        }
-        else{
-            test_ec.loss = test_ec.weight;
-            b.num_mistakes++;
-        }
-        free_example(&ec);
+        v_array<uint32_t> top_K_labels = v_init<uint32_t>();
+        compute_scores_labels(b, base, cn, ec, b.K, top_K_labels);
+    
+        ec.pred.multilabels = preds; 
+        ec.l.multilabels = multilabels;
+        
+        //compute precision @ K:
+        copy_array(ec.pred.multilabels.label_v, top_K_labels);
+        float p_at_k = compute_precision_at_K(ec);
+        b.num_mistakes += (1 - p_at_k);
+        //free_example(&ec);
     }
 
     //node here the ec is already stored in the b.examples, the task here is to rout it to the leaf, 
@@ -858,29 +743,21 @@ namespace memory_tree_xml_ns
             uint32_t newcn = descent(b.nodes[cn], router_pred); //updated nr or nl
             cn = newcn; 
         }
+        if ((b.nodes[cn].internal == -1) && (b.learn_at_leaf == true)){ //if reach leaf, we learn similarity:
+            learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]);  //learn similarity function at leafb.l
+        }
+
+        //insert the example in leaf and deal with split:
         if((b.nodes[cn].internal == -1) && (fake_insert == false)) //get to leaf:
         {   
             b.nodes[cn].examples_index.push_back(ec_array_index);
-            if (b.nodes[cn].examples_index.size() > b.max_ex_in_leaf)
-            {
-                b.max_ex_in_leaf = b.nodes[cn].examples_index.size();
-                //cout<<cn<<" "<<b.max_ex_in_leaf<<endl;
-            }
             float leaf_pred = train_node(b, base, *b.examples[ec_array_index], cn); //tain the leaf as well.
             descent(b.nodes[cn], leaf_pred); //this is a faked descent, the purpose is only to update nl and nr of cn
 
             //if the number of examples exceeds the max_leaf_examples, and not reach the max_nodes - 2 yet, we split:
-            if((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size() + 2 <= b.max_nodes)){
+            if((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size() + 2 <= b.max_nodes))
                 split_leaf(b, base, cn); 
-            }
-            else{
-                if (b.learn_at_leaf == true){
-	                learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]);  //learn similarity function at leafb.l
-                }
-            }
         }
-        else if((b.nodes[cn].internal == -1) && (fake_insert == true))
-            learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]); 
     }
 
     void experience_replay(memory_tree& b, base_learner& base)
@@ -902,25 +779,29 @@ namespace memory_tree_xml_ns
     {        
         if (b.test_mode == false){
             b.iter++;
+
             predict(b, base, ec);
             if (b.iter%5000 == 0)
                 cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
-
+            
             example* new_ec = &calloc_or_throw<example>();
             copy_example_data(new_ec, &ec);
             //remove_repeat_features_in_ec(*new_ec); ////sort unique.
+            
             b.examples.push_back(new_ec);   
             b.num_ecs++; 
 
             float random_prob = merand48(b.all->random_state);
-            if (random_prob < 1.)
+            if (true){
                 insert_example(b, base, b.examples.size()-1);
+            }
             else{
                 insert_example(b, base, b.examples.size()-1, true);
                 b.num_ecs--;
                 free_example(new_ec);
                 b.examples.pop();
             }
+
             //if (b.iter % 1 == 0)
             for (int i = 0; i < 1; i++)
                 experience_replay(b, base);   
@@ -934,6 +815,67 @@ namespace memory_tree_xml_ns
 
     } 
 
+    /////////////////////////////output stuff///////////////
+    bool is_test_label(MULTILABEL::labels& ld)
+    { if (ld.label_v.size() == 0)
+        return true;
+    else
+        return false;
+    }
+
+    void print_update(vw& all, bool is_test, example& ec)
+    { if (all.sd->weighted_examples() >= all.sd->dump_interval && !all.quiet && !all.bfgs)
+    { stringstream label_string;
+        if (is_test)
+        label_string << " unknown";
+        else
+        for(size_t i = 0; i < ec.l.multilabels.label_v.size(); i++)
+            label_string << " " << ec.l.multilabels.label_v[i];
+
+        stringstream pred_string;
+        for(size_t i = 0; i < ec.pred.multilabels.label_v.size(); i++)
+        pred_string << " " << ec.pred.multilabels.label_v[i];
+
+        all.sd->print_update(all.holdout_set_off, all.current_pass, label_string.str(), pred_string.str(),
+                         ec.num_features, all.progress_add, all.progress_arg);
+    }
+    }
+
+
+
+    void output_example(vw& all, example& ec)
+    { 
+        MULTILABEL::labels& ld = ec.l.multilabels;
+        float loss = 0.;
+        if (!is_test_label(ld))
+        { //need to compute exact loss
+            float pk_score = compute_precision_at_K(ec);
+            loss =+ (1. - pk_score) * ec.weight;
+        }
+
+        all.sd->update(ec.test_only, !is_test_label(ld), loss, 1.f, ec.num_features);
+
+        for (int sink : all.final_prediction_sink)
+            if (sink >= 0)
+        { std::stringstream ss;
+
+        for (size_t i = 0; i < ec.pred.multilabels.label_v.size(); i++)
+        { if (i > 0)
+              ss << ',';
+            ss << ec.pred.multilabels.label_v[i];
+        }
+        ss << ' ';
+        all.print_text(sink, ss.str(), ec.tag);
+        }
+
+    print_update(all, is_test_label(ec.l.multilabels), ec);
+    }
+
+    void finish_example(vw& all, memory_tree&, example& ec)
+    {
+        output_example(all, ec);
+        VW::finish_example(all, &ec);
+    }
 
     void finish(memory_tree& b)
     {
@@ -980,13 +922,21 @@ namespace memory_tree_xml_ns
     void save_load_example(example* ec, io_buf& model_file, bool& read, bool& text, stringstream& msg)
     {   //deal with tag
         //deal with labels:
-        writeit(ec->l.multi.label, "multiclass_label");
-        writeit(ec->l.multi.weight, "multiclass_weight");
+        //writeit(ec->l.multi.label, "multiclass_label");
+        //writeit(ec->l.multi.weight, "multiclass_weight");
         writeit(ec->num_features, "num_features");
         writeit(ec->total_sum_feat_sq, "total_sum_features");
         writeit(ec->weight, "example_weight");
         writeit(ec->loss, "loss");
         writeit(ec->ft_offset, "ft_offset");
+        writeitvar(ec->l.multilabels.label_v.size(), "label_size", label_size);
+        if (read){
+            ec->l.multilabels.label_v.erase();
+            for (uint32_t i = 0; i < label_size; i++)
+                ec->l.multilabels.label_v.push_back(0);
+        }
+        for (uint32_t i = 0; i < label_size; i++)
+            writeit(ec->l.multilabels.label_v[i], "ec_label");
 
         writeitvar(ec->tag.size(), "tags", tag_number);
         if (read){
@@ -1098,7 +1048,7 @@ namespace memory_tree_xml_ns
     //////////////////////////////End of Save & Load///////////////////////////////
 } //namespace
 
-base_learner* memory_tree_setup(vw& all)
+base_learner* memory_tree_xml_setup(vw& all)
 {
     using namespace memory_tree_xml_ns;
     if (missing_option<uint32_t, true>(all, "memory_tree_xml", "Make a memory tree with at most <n> nodes"))
@@ -1107,14 +1057,17 @@ base_learner* memory_tree_setup(vw& all)
     new_options(all, "memory tree xml options")
       ("leaf_example_multiplier", po::value<uint32_t>()->default_value(1.0), "multiplier on examples per leaf (default = log nodes)")
       ("learn_at_leaf", po::value<bool>()->default_value(true), "whether or not learn at leaf (defualt = True)")
+      ("Precision_at_K", po::value<int>()->default_value(1), "Precision@K (defualt K = 1)")
       ("Alpha", po::value<float>()->default_value(0.1), "Alpha");
      add_options(all);
 
     po::variables_map& vm = all.vm;
-    memory_tree& tree = calloc_or_throw<memory_tree> ();
+
+    memory_tree& tree = calloc_or_throw<memory_tree>();
     tree.all = &all;
-    tree.max_nodes = vm["memory_tree"].as<uint32_t>();
+    tree.max_nodes = vm["memory_tree_xml"].as<uint32_t>();
     tree.learn_at_leaf = vm["learn_at_leaf"].as<bool>();
+    tree.K = vm["Precision_at_K"].as<int>();
 
     if (vm.count("leaf_example_multiplier"))
       {
@@ -1133,20 +1086,24 @@ base_learner* memory_tree_setup(vw& all)
         all.trace_message << "memory_tree_xml:" << " "
                     <<"max_nodes = "<< tree.max_nodes << " " 
                     <<"max_leaf_examples = "<<tree.max_leaf_examples<<" "
-                    <<"alpha = "<<tree.alpha
+                    <<"alpha = "<<tree.alpha<<" "
+                    <<"Precision@K, K = "<<tree.K
                     <<std::endl;
     
     learner<memory_tree>& l = 
         init_learner(&tree, setup_base(all), learn, predict, tree.max_routers,
                     prediction_type::multilabels);
+    
+    l.set_save_load(save_load_memory_tree);
+    l.set_finish_example(finish_example);
+    l.set_finish(finish);
+
     all.p->lp = MULTILABEL::multilabel;
     all.label_type = label_type::multi;
+    all.delete_prediction = MULTILABEL::multilabel.delete_label;
 
 
     //srand(time(0));
-    l.set_save_load(save_load_memory_tree);
-    l.set_finish(finish);
-
     return make_base (l);
 }
 
