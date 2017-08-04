@@ -78,6 +78,7 @@ namespace memory_tree_xml_ns
 
     inline void free_example(example* ec)
     {
+        //ec->l.multilabels.label_v.delete_v();
         ec->tag.delete_v();
         if (ec->passthrough){
             ec->passthrough->delete_v();
@@ -143,6 +144,7 @@ namespace memory_tree_xml_ns
                 total_sum_feat_sq += pow(value, 2);
             }
         }
+        tmp_f2_indicies.erase();
     }
     //kronecker_prod at example level:
     void diag_kronecker_product(example& ec1, example& ec2, example& ec)
@@ -578,11 +580,11 @@ namespace memory_tree_xml_ns
             uint32_t loc = b.nodes[cn].examples_index[i];
             if (b.learn_at_leaf == true){
                 example* kprod_ec = &calloc_or_throw<example>();
-
                 diag_kronecker_product(ec, *b.examples[loc], *kprod_ec);
                 kprod_ec->l.simple = {1.f, 1., 0.};
                 base.predict(*kprod_ec, b.max_routers);
                 score = kprod_ec->partial_prediction;
+                kprod_ec->l.multilabels.label_v.erase();
                 free_example(kprod_ec);
             } 
             else
@@ -593,7 +595,7 @@ namespace memory_tree_xml_ns
                 bool in = false;
                 for (score_label& s_l : score_labs){
                     if (lab == s_l.label){ //this lab is in score_labs array
-                        s_l.score += exp(5*(score-1.));
+                        s_l.score += exp(1.*(score));
                         in = true;
                         break;
                     }
@@ -665,10 +667,11 @@ namespace memory_tree_xml_ns
             int num_overlap = over_lap(b.examples[loc]->l.multilabels.label_v, ec.l.multilabels.label_v);
             
             if (num_overlap > 0)
+                //kprod_ec->l.simple = {float(1.*num_overlap), 1.f, 0.}; //weighted based on the number of overlap items.
                 kprod_ec->l.simple = {1.f, float(1.*num_overlap), 0.}; //weighted based on the number of overlap items.
             else
-                //kprod_ec->l.simple = {-1., 1., 0.}; //reward = 0:
-                kprod_ec->l.simple = {0.f, 1.f, 0.};
+                kprod_ec->l.simple = {-1.f, 1., 0.}; //reward = 0:
+                //kprod_ec->l.simple = {0.f, 1.f, 0.};
     
             base.learn(*kprod_ec, b.max_routers);
 
@@ -679,8 +682,8 @@ namespace memory_tree_xml_ns
             kprod_ec->pred.multilabels = k_preds;
             kprod_ec->l.multilabels = k_multilabels; 
             
+            kprod_ec->l.multilabels.label_v.erase();
             free_example(kprod_ec);
-            
         }
     } 
 

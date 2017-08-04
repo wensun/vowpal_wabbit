@@ -237,6 +237,7 @@ namespace memory_tree_ns
                 total_sum_feat_sq += pow(value, 2);
             }
         }
+        tmp_f2_indicies.erase();
     }
     //kronecker_prod at example level:
     void diag_kronecker_product(example& ec1, example& ec2, example& ec)
