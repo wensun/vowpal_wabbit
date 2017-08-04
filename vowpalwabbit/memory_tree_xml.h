@@ -1,0 +1,1 @@
+LEARNER::base_learner* memory_tree_xml_setup(vw& all);
