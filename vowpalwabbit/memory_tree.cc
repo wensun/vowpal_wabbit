@@ -230,6 +230,7 @@ namespace memory_tree_ns
                 total_sum_feat_sq += pow(f1.values[i1],2);
             }
         }
+        
         for (size_t i2 = 0; i2 < tmp_f2_indicies.size(); i2++){
             if (tmp_f2_indicies[i2] != 0){
                 float value = 0.0 - abs(f2.values[i2]/pow(norm_sq2,0.5));
@@ -237,13 +238,14 @@ namespace memory_tree_ns
                 total_sum_feat_sq += pow(value, 2);
             }
         }
-        tmp_f2_indicies.erase();
+        tmp_f2_indicies.delete_v();
     }
     //kronecker_prod at example level:
     void diag_kronecker_product(example& ec1, example& ec2, example& ec)
     {
         //ec <= ec1 X ec2
         copy_example_data(&ec, &ec1);
+        ec.sorted = false;
         ec.total_sum_feat_sq = 0.0;
         for(namespace_index c : ec.indices){
             for(namespace_index c2 : ec2.indices){
@@ -440,7 +442,18 @@ namespace memory_tree_ns
         return l2_dis;
     }
 
-  
+    float normalized_linear_prod(memory_tree& b, example* ec1, example* ec2)
+    {
+        flat_example* fec1 = flatten_sort_example(*b.all, ec1);
+        flat_example* fec2 = flatten_sort_example(*b.all, ec2);
+        float linear_prod = linear_kernel(fec1, fec2);
+        fec1->fs.delete_v(); 
+        fec2->fs.delete_v();
+        free(fec1);
+        free(fec2);
+        return linear_prod/pow(fec1->total_sum_feat_sq*fec2->total_sum_feat_sq, 0.5);
+    }
+
 
     void init_tree(memory_tree& b)
     {
@@ -648,7 +661,8 @@ namespace memory_tree_ns
                     free_example(kprod_ec);
                 }
                 else
-                    score = -1.*compute_l2_distance(b, &ec, b.examples[loc]); 
+                    //score = -1.*compute_l2_distance(b, &ec, b.examples[loc]); 
+                    score = normalized_linear_prod(b, &ec, b.examples[loc]);
                 
                 if (score > max_score){
                     max_score = score;
@@ -666,15 +680,17 @@ namespace memory_tree_ns
         for (uint32_t loc : b.nodes[cn].examples_index)
         {
             example* ec_loc = b.examples[loc];
+            //float score = -compute_l2_distance(b, &ec, ec_loc); //score based on the l2_distance. 
+            float score = normalized_linear_prod(b, &ec, ec_loc);
+            score = 0.0;
             example* kprod_ec = &calloc_or_throw<example>();
             diag_kronecker_product(ec, *ec_loc, *kprod_ec);
             if (ec.l.multi.label == b.examples[loc]->l.multi.label) //reward = 1:    
-                kprod_ec->l.simple = {1., 1., 0.};
+                kprod_ec->l.simple = {1., 1., score};
             else
-                kprod_ec->l.simple = {-1., 1., 0.}; //reward = 0:
-                //kprod_ec->l.simple = {0., 1., 0.};
+                kprod_ec->l.simple = {-1., 1., score}; //reward = 0:
+                //kprod_ec->l.simple = {0., 1., score};
         
-            
             base.learn(*kprod_ec, b.max_routers);
             free_example(kprod_ec);
         }

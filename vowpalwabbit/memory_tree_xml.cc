@@ -37,14 +37,14 @@ namespace memory_tree_xml_ns
 
     inline void copy_example_data(example* dst, const example* src, bool no_multilabel = false, bool no_feat = false)
     { 
-        //if (!no_multilabel){
+        if (!no_multilabel){
             //dst->l.multilabels = src->l.multilabels;
-        copy_array(dst->l.multilabels.label_v, src->l.multilabels.label_v);
-        //}
-        //else{
-        //    dst->l = src->l;
-            //dst->l.multi.label = src->l.multi.label;
-        //}
+            copy_array(dst->l.multilabels.label_v, src->l.multilabels.label_v);
+        }
+        else{
+            dst->l = src->l;
+            dst->l.multi.label = src->l.multi.label;
+        }
 
         copy_array(dst->tag, src->tag);
         dst->example_counter = src->example_counter;
@@ -144,13 +144,13 @@ namespace memory_tree_xml_ns
                 total_sum_feat_sq += pow(value, 2);
             }
         }
-        tmp_f2_indicies.erase();
+        tmp_f2_indicies.delete_v();
     }
     //kronecker_prod at example level:
     void diag_kronecker_product(example& ec1, example& ec2, example& ec)
     {
         //ec <= ec1 X ec2
-        copy_example_data(&ec, &ec1, false, false);
+        copy_example_data(&ec, &ec1, true, false);
         ec.total_sum_feat_sq = 0.0;
         for(namespace_index c : ec.indices){
             for(namespace_index c2 : ec2.indices){
@@ -580,11 +580,15 @@ namespace memory_tree_xml_ns
             uint32_t loc = b.nodes[cn].examples_index[i];
             if (b.learn_at_leaf == true){
                 example* kprod_ec = &calloc_or_throw<example>();
+
+                //MULTILABEL::labels k_multilabels = kprod_ec->l.multilabels;
                 diag_kronecker_product(ec, *b.examples[loc], *kprod_ec);
                 kprod_ec->l.simple = {1.f, 1., 0.};
                 base.predict(*kprod_ec, b.max_routers);
                 score = kprod_ec->partial_prediction;
-                kprod_ec->l.multilabels.label_v.erase();
+
+                //kprod_ec->l.multilabels = k_multilabels;
+                //kprod_ec->l.multilabels.label_v.delete_v();
                 free_example(kprod_ec);
             } 
             else
@@ -624,7 +628,7 @@ namespace memory_tree_xml_ns
                 score_labs[max_lab_loc].score = -FLT_MAX; 
             }
         }
-        //score_labs.delete_v();
+        score_labs.delete_v();
     }
 
     template<typename T> 
@@ -652,8 +656,8 @@ namespace memory_tree_xml_ns
 
     void learn_similarity_at_leaf(memory_tree& b, base_learner& base, const uint32_t cn, example& ec)
     {
-        MULTILABEL::labels multilabels = ec.l.multilabels;
-        MULTILABEL::labels preds = ec.pred.multilabels;
+        //MULTILABEL::labels multilabels = ec.l.multilabels;
+        //MULTILABEL::labels preds = ec.pred.multilabels;
         for (uint32_t loc : b.nodes[cn].examples_index)
         {
             example* ec_loc = b.examples[loc];
@@ -661,8 +665,8 @@ namespace memory_tree_xml_ns
 
             diag_kronecker_product(ec, *ec_loc, *kprod_ec);
 
-            MULTILABEL::labels k_multilabels = kprod_ec->l.multilabels;
-            MULTILABEL::labels k_preds = kprod_ec->pred.multilabels;
+            //MULTILABEL::labels k_multilabels = kprod_ec->l.multilabels;
+            //MULTILABEL::labels k_preds = kprod_ec->pred.multilabels;
         
             int num_overlap = over_lap(b.examples[loc]->l.multilabels.label_v, ec.l.multilabels.label_v);
             
@@ -675,14 +679,12 @@ namespace memory_tree_xml_ns
     
             base.learn(*kprod_ec, b.max_routers);
 
+            //ec.pred.multilabels = preds;
+            //ec.l.multilabels = multilabels;
 
-            ec.pred.multilabels = preds;
-            ec.l.multilabels = multilabels;
-
-            kprod_ec->pred.multilabels = k_preds;
-            kprod_ec->l.multilabels = k_multilabels; 
-            
-            kprod_ec->l.multilabels.label_v.erase();
+            //kprod_ec->pred.multilabels = k_preds;
+            //kprod_ec->l.multilabels = k_multilabels; 
+            //kprod_ec->l.multilabels.label_v.delete_v();
             free_example(kprod_ec);
         }
     } 
@@ -731,6 +733,7 @@ namespace memory_tree_xml_ns
         copy_array(ec.pred.multilabels.label_v, top_K_labels);
         float p_at_k = compute_precision_at_K(ec);
         b.num_mistakes += (1 - p_at_k);
+        top_K_labels.delete_v();
         //free_example(&ec);
     }
 
