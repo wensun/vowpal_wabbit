@@ -91,27 +91,27 @@ namespace memory_tree_rew_ns
             size_t i2 = 0;
             for (i2 = 0; i2 < f2.indicies.size(); i2++){
                 if (f1.indicies[i1] == f2.indicies[i2]){
-                    f1.values[i1] = f1.values[i1]*f2.values[i2]/pow(norm_sq1*norm_sq2,0.5) - fabs(f1.values[i1]/pow(norm_sq1,0.5) - f2.values[i2]/pow(norm_sq2,0.5));
-                    //f1.values[i1] = f1.values[i1]*f2.values[i2] / pow(norm_sq1*norm_sq2, 0.5);
+                    //f1.values[i1] = f1.values[i1]*f2.values[i2]/pow(norm_sq1*norm_sq2,0.5) - fabs(f1.values[i1]/pow(norm_sq1,0.5) - f2.values[i2]/pow(norm_sq2,0.5));
+                    f1.values[i1] = f1.values[i1]*f2.values[i2] / pow(norm_sq1*norm_sq2, 0.5);
                     total_sum_feat_sq += pow(f1.values[i1],2);
                     tmp_f2_indicies[i2] = 0;
                     break;
                 }
             }
             if (i2 == f2.indicies.size()){ //f1's index does not appear in f2, namely value of the index in f2 is zero.
-                //f1.values[i1] = 0.0;
-                f1.values[i1] = 0.0 - fabs(f1.values[i1]/pow(norm_sq1,0.5));
+                f1.values[i1] = 0.0;
+                //f1.values[i1] = 0.0 - fabs(f1.values[i1]/pow(norm_sq1,0.5));
                 total_sum_feat_sq += pow(f1.values[i1],2);
             }
         }
         
-        for (size_t i2 = 0; i2 < tmp_f2_indicies.size(); i2++){
+        /*for (size_t i2 = 0; i2 < tmp_f2_indicies.size(); i2++){
             if (tmp_f2_indicies[i2] != 0){
                 float value = 0.0 - fabs(f2.values[i2]/pow(norm_sq2,0.5));
                 f1.push_back(value, f2.indicies[i2]);
                 total_sum_feat_sq += pow(value, 2);
             }
-        }
+        }*/
         tmp_f2_indicies.delete_v();
     }
     //kronecker_prod at example level:
@@ -143,8 +143,8 @@ namespace memory_tree_rew_ns
         double nl; //number of examples routed to left.
         double nr; //number of examples routed to right.
         
-        double c_rew_l; //cummulative rewards of examples routed to left.
-        double c_rew_r; //cummulative rewards of examples routed to right.
+        double bar_rew_L; //cummulative rewards of examples routed to left.
+        double bar_rew_R; //cummulative rewards of examples routed to right.
 
         v_array<uint32_t> examples_index;
 
@@ -157,8 +157,8 @@ namespace memory_tree_rew_ns
             right = 0;
             nl = 0.001; //initilze to 1, as we need to do nl/nr.
             nr = 0.001; 
-            c_rew_l = 0.;
-            c_rew_r = 0.;
+            bar_rew_L = 0.;
+            bar_rew_R = 0.;
             examples_index = v_init<uint32_t>();
         }
     };
@@ -237,19 +237,6 @@ namespace memory_tree_rew_ns
         return dotprod;
     }
 
-    float compute_l2_distance(memory_tree& b, example* ec1, example* ec2)
-    {
-        flat_example* fec1 = flatten_sort_example(*b.all, ec1);
-        flat_example* fec2 = flatten_sort_example(*b.all, ec2);
-        float linear_prod = linear_kernel(fec1, fec2);
-        float l2_dis = 1. + 1. - 2.*linear_prod/pow(fec1->total_sum_feat_sq*fec2->total_sum_feat_sq, 0.5);
-        fec1->fs.delete_v(); 
-        fec2->fs.delete_v();
-        free(fec1);
-        free(fec2);
-        return l2_dis;
-    }
-
     float normalized_linear_prod(memory_tree& b, example* ec1, example* ec2)
     {
         flat_example* fec1 = flatten_sort_example(*b.all, ec1);
@@ -280,8 +267,7 @@ namespace memory_tree_rew_ns
 
     //return the id of the example and the leaf id (stored in cn)
     inline int random_sample_example_pop(memory_tree& b, uint32_t& cn, bool decrease_count = true)
-    {
-        cn = 0; //always start from the root:
+    {   //always start from the root: root is initialized at cn:
         while (b.nodes[cn].internal == 1)
         {
             float pred = 0.;   //deal with some edge cases:
@@ -310,7 +296,8 @@ namespace memory_tree_rew_ns
         }
         if (b.nodes[cn].examples_index.size() >= 1){
             int loc_at_leaf = int(merand48(b.all->random_state)*b.nodes[cn].examples_index.size());
-            pop_at_index(b.nodes[cn].examples_index, loc_at_leaf); 
+            if (decrease_count == true)
+                pop_at_index(b.nodes[cn].examples_index, loc_at_leaf); 
             return loc_at_leaf;
         }
         else    //leaf that has zero examples. 
@@ -384,25 +371,103 @@ namespace memory_tree_rew_ns
             return 0.f;
     }
 
-    float train_node(memory_tree& b, base_learner& base, example& ec, const uint32_t cn, bool uniform_sample = false)
+    float routing_grab_reward(memory_tree& b, base_learner& base, example& ec, const uint32_t cn, uint32_t current_d, const uint32_t max_d)
+    {
+        if (b.nodes[cn].internal == -1){
+            int64_t closest = pick_nearest(b, base, cn, ec);
+            float reward = closest == -1 ? 0 : get_reward(ec, *b.examples[closest]);
+            return reward;
+        }
+        else if (current_d == max_d){
+            float reward = 0.;
+            uint32_t routed_leaf = routing(b, cn, base, ec);
+            int64_t closest_ec = pick_nearest(b, base, routed_leaf, ec);
+            reward = closest_ec == -1? 0.:get_reward(ec, *b.examples[closest_ec]);
+            return reward;
+        }
+        else if (current_d < max_d){
+            uint32_t left_c = b.nodes[cn].left;
+            uint32_t right_c = b.nodes[cn].right;
+            float reward_l = routing_grab_reward(b, base, ec, left_c, current_d+1, max_d);
+            float reward_r = routing_grab_reward(b, base, ec, right_c, current_d+1, max_d);
+            float reward = reward_l > reward_r ? reward_l : reward_r;
+            return reward;
+        }
+        return 0.;
+    }
+
+    float train_node(memory_tree& b, base_learner& base, example& ec, const uint32_t cn)
+    {
+        int sample_repeat = log(b.max_nodes/2.*b.max_leaf_examples)/log(2.)*10.;
+        float beta = 0.99;
+        if (b.nodes[cn].internal == -1){ //leaf: do nothing. 
+            cout<<"Error: Train_node is called at a leaf.."<<endl;
+            return 0.f;
+        }
+        float rew_left = 0.;
+        float rew_right = 0.;
+        for (int repeat = 0; repeat <= sample_repeat; repeat++){
+            uint32_t cn_left = b.nodes[cn].left;
+            uint32_t cn_right = b.nodes[cn].right;
+            int loc_at_left_leaf = random_sample_example_pop(b, cn_left, false);
+            int loc_at_right_leaf = random_sample_example_pop(b, cn_right, false);
+            rew_left += (loc_at_left_leaf == -1 ? 0.:get_reward(ec, *b.examples[b.nodes[cn_left].examples_index[loc_at_left_leaf]]));
+            rew_right+= (loc_at_right_leaf== -1 ? 0.:get_reward(ec, *b.examples[b.nodes[cn_right].examples_index[loc_at_right_leaf]]));
+        }
+        rew_left /= (sample_repeat*1.0);
+        rew_right /= (sample_repeat*1.0);
+
+        //r conditioned right:
+        float r_R_p = (b.nodes[cn].nr+1.)/(b.nodes[cn].nr+1.+b.nodes[cn].nl)*(beta*b.nodes[cn].bar_rew_R+(1.-beta)*rew_right)/(1.-pow(beta,b.nodes[cn].nr+1));
+        float r_R = (b.nodes[cn].nr)/(b.nodes[cn].nl+b.nodes[cn].nr+1.0)*b.nodes[cn].bar_rew_R/(1.-pow(beta,b.nodes[cn].nr));
+        float r_L_p = (b.nodes[cn].nl+1.0)/(b.nodes[cn].nr+b.nodes[cn].nl+1.)*(beta*b.nodes[cn].bar_rew_L+(1.-beta)*rew_left)/(1.-pow(beta,b.nodes[cn].nl+1));
+        float r_L = (b.nodes[cn].nl)/(b.nodes[cn].nl+b.nodes[cn].nr+1.0)*b.nodes[cn].bar_rew_L/(1.-pow(beta,b.nodes[cn].nl));
+        float delta_r_l = (r_R_p + r_L) - (r_L_p + r_R);
+        float balanced = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha*(delta_r_l); //regularization for balance.
+        float route_label = (balanced <= 0 ? -1.f : 1.f);
+
+        MULTICLASS::label_t mc = ec.l.multi;
+        uint32_t save_multi_pred = ec.pred.multiclass;
+        ec.l.simple = {route_label, fabs(balanced), 0.f};
+        base.learn(ec, b.nodes[cn].base_router);
+        base.predict(ec, b.nodes[cn].base_router);
+        float save_pred_scalar = ec.pred.scalar;
+        
+        ec.l.multi = mc;
+        ec.pred.multiclass = save_multi_pred;
+        //update the bar_rew in nodes based on partial prediction: update exponential moving average:
+        if (save_pred_scalar <= 0)
+            b.nodes[cn].bar_rew_L = beta*b.nodes[cn].bar_rew_L + (1.-beta)*rew_left;
+        else
+            b.nodes[cn].bar_rew_R = beta*b.nodes[cn].bar_rew_R + (1.-beta)*rew_right;
+        return save_pred_scalar;
+    }
+
+    float train_node_old(memory_tree& b, base_learner& base, example& ec, const uint32_t cn, bool uniform_sample = false)
     {
         if (b.nodes[cn].internal == -1){ //leaf: do nothing. 
             cout<<"Error: Train_node is called at a leaf.."<<endl;
             return 0.f;
         }
+        //float rew_left = routing_grab_reward_depth_one(b, base, ec, b.nodes[cn].left);
+        //float rew_right= routing_grab_reward_depth_one(b, base, ec, b.nodes[cn].right);
+        float rew_left = routing_grab_reward(b, base, ec, b.nodes[cn].left, 0, 2);
+        float rew_right = routing_grab_reward(b, base, ec, b.nodes[cn].right, 0, 2);
+        
+        //float rew_left = routing_grab_reward_depth_zero(b, base, ec, b.nodes[cn].left);
+        //float rew_right = routing_grab_reward_depth_zero(b,base, ec, b.nodes[cn].right);
 
-        uint32_t left_routed_leaf = routing(b, b.nodes[cn].left, base, ec);
+
+        /*uint32_t left_routed_leaf = routing(b, b.nodes[cn].left, base, ec);
         uint32_t right_routed_leaf = routing(b, b.nodes[cn].right, base, ec);
-
         int64_t left_closest_ec = pick_nearest(b, base, left_routed_leaf, ec, uniform_sample);
         int64_t right_closest_ec = pick_nearest(b, base, right_routed_leaf, ec, uniform_sample);
-
         float rew_left = 0.f;
         if (left_closest_ec != -1)
             rew_left = get_reward(ec, *b.examples[left_closest_ec]);
         float rew_right = 0.f;
         if (right_closest_ec != -1)
-            rew_right = get_reward(ec, *b.examples[right_closest_ec]);
+            rew_right = get_reward(ec, *b.examples[right_closest_ec]);*/
 
         //float delta_r_l = (b.nodes[cn].nr+1.)/(b.nodes[cn].nl+1.+b.nodes[cn].nr)*rew_right - (b.nodes[cn].nl+1.)/(b.nodes[cn].nl+1.+b.nodes[cn].nr)*rew_left; 
         float delta_r_l = rew_right - rew_left; 
@@ -427,6 +492,9 @@ namespace memory_tree_rew_ns
     {
         //create two children
         b.nodes[cn].internal = 1; //swith to internal node.
+        b.nodes[cn].nl = 0.001;
+        b.nodes[cn].nr = 0.001;
+        
         uint32_t left_child = (uint32_t)b.nodes.size();
         b.nodes.push_back(node());
         b.nodes[left_child].internal = -1;  //left leaf
@@ -443,15 +511,10 @@ namespace memory_tree_rew_ns
         b.nodes[left_child].depth = b.nodes[cn].depth + 1;
         b.nodes[right_child].depth = b.nodes[cn].depth + 1;
 
-        if (b.nodes[left_child].depth > b.max_depth){
-            b.max_depth = b.nodes[left_child].depth;
-            cout<<b.max_depth<<endl;
-        }
-
         for (size_t ec_id = 0; ec_id < b.nodes[cn].examples_index.size(); ec_id++)
         {
             uint32_t ec_pos = b.nodes[cn].examples_index[ec_id];
-            float pred_scalar = train_node(b, base, *b.examples[ec_pos], cn, false); //train and pred, pick example in the leaf uniformly random:
+            float pred_scalar = train_node(b, base, *b.examples[ec_pos], cn); //train and pred, pick example in the leaf uniformly random:
             if (pred_scalar <= 0){ //go left
                 b.nodes[left_child].examples_index.push_back(ec_pos);
                 b.nodes[cn].nl += 1;    
@@ -472,11 +535,9 @@ namespace memory_tree_rew_ns
             example* kprod_ec = &calloc_or_throw<example>();
             diag_kronecker_product(ec, *ec_loc, *kprod_ec);
             float rew = get_reward(ec, *ec_loc);
-            if (rew == 0)
-                rew = -1.;
-
-            float score = normalized_linear_prod(b, &ec, ec_loc);
-            kprod_ec->l.simple = {rew, 1., -score}; //regressor;
+            //if (rew == 0)
+            //    rew = -1.;
+            kprod_ec->l.simple = {rew, 1., 0.}; //regressor;
             base.learn(*kprod_ec, b.max_routers);
             free_example(kprod_ec);
         }
@@ -732,7 +793,7 @@ base_learner* memory_tree_rew_setup(vw& all)
     new_options(all, "memory tree (reward guided) options")
       ("leaf_example_multiplier", po::value<uint32_t>()->default_value(1.0), "multiplier on examples per leaf (default = log nodes)")
       ("learn_at_leaf", po::value<bool>()->default_value(true), "whether or not learn at leaf (defualt = True)")
-      ("Alpha", po::value<float>()->default_value(0.1), "Alpha");
+      ("Alpha", po::value<float>()->default_value(0.5), "Alpha");
      add_options(all);
 
     po::variables_map& vm = all.vm;

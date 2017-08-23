@@ -83,14 +83,16 @@ namespace memory_tree_ns
 
 
 
-    void remove_repeat_features_in_f(features& f)
+    void remove_repeat_features_in_f(features& f, float& total_sum_feat_sq )
     {
         for (size_t i = 0; i < f.indicies.size(); i++){
             if (f.values[i] != -FLT_MAX){
                 uint64_t loc = f.indicies[i];
                 for (size_t j = i+1; j < f.indicies.size(); j++){
                     if (loc == f.indicies[j]){
+                        total_sum_feat_sq -= (f.values[i]*f.values[i] + f.values[j]*f.values[j]);
                         f.values[i] += f.values[j];
+                        total_sum_feat_sq += f.values[i]*f.values[i];
                         f.values[j] = -FLT_MAX;
                     }
                 }
@@ -105,7 +107,7 @@ namespace memory_tree_ns
     void remove_repeat_features_in_ec(example& ec)
     {
         for (auto nc : ec.indices)
-            remove_repeat_features_in_f(ec.feature_space[nc]);
+            remove_repeat_features_in_f(ec.feature_space[nc], ec.total_sum_feat_sq);
     }
 
     //f = f1 - f2
@@ -209,6 +211,44 @@ namespace memory_tree_ns
 
     ////Implement kronecker_product between two examples:
     //kronecker_prod at feature level:
+
+    void diag_kronecker_prod_fs_test(features& f1, features& f2, features& prod_f, float& total_sum_feat_sq, float norm_sq1, float norm_sq2)
+    {
+        prod_f.delete_v();
+        if (f2.indicies.size() == 0)
+            return;
+    
+        for (size_t idx1 = 0, idx2 = 0; idx1 < f1.size() && idx2 < f2.size(); idx1++)
+        {
+            uint64_t ec1pos = f1.indicies[idx1];
+            uint64_t ec2pos = f2.indicies[idx2];
+            if (ec1pos < ec2pos) continue;
+
+            while (ec1pos > ec2pos && ++idx2 < f2.size())
+                ec2pos = f2.indicies[idx2];
+
+            if (ec1pos == ec2pos){
+                prod_f.push_back(f1.values[idx1]*f2.values[idx2]/pow(norm_sq1*norm_sq2,0.5), ec1pos);
+                total_sum_feat_sq+=f1.values[idx1]*f2.values[idx2]/pow(norm_sq1*norm_sq2,0.5);
+                ++idx2;
+            }
+        }
+    }
+
+    void diag_kronecker_product_test(example& ec1, example& ec2, example& ec)
+    {
+        copy_example_data(&ec, &ec1);
+        ec.total_sum_feat_sq = 0.0;
+        for(namespace_index c1 : ec1.indices){
+            for(namespace_index c2 : ec2.indices){
+                if (c1 == c2)
+                    diag_kronecker_prod_fs_test(ec1.feature_space[c1], ec2.feature_space[c2], ec.feature_space[c1], ec.total_sum_feat_sq, ec1.total_sum_feat_sq, ec2.total_sum_feat_sq);
+            }
+        }
+    }
+
+
+    /*
     void diag_kronecker_prod_fs(features& f1, features& f2, float& total_sum_feat_sq, float norm_sq1, float norm_sq2)
     {
         v_array<feature_index> tmp_f2_indicies = v_init<feature_index>();
@@ -230,6 +270,7 @@ namespace memory_tree_ns
                 total_sum_feat_sq += pow(f1.values[i1],2);
             }
         }
+        
         
         for (size_t i2 = 0; i2 < tmp_f2_indicies.size(); i2++){
             if (tmp_f2_indicies[i2] != 0){
@@ -253,7 +294,7 @@ namespace memory_tree_ns
                     diag_kronecker_prod_fs(ec.feature_space[c], ec2.feature_space[c2], ec.total_sum_feat_sq, ec1.total_sum_feat_sq, ec2.total_sum_feat_sq);
             }
         }
-    }
+    }*/
 
     void kronecker_product_f(features& f1, features& f2, features& f, float& total_sq, size_t& num_feat, uint64_t mask, size_t ss)
     {
@@ -289,8 +330,8 @@ namespace memory_tree_ns
         ec.indices.delete_v();
         //ec.indices.push_back(conditioning_namespace); //134, x86
         //ec.indices.push_back(dictionary_namespace); //135 x87
-        unsigned char namespace_1 = 'a';
-        unsigned char namespace_2 = 'b';
+        unsigned char namespace_1 = 'x';
+        unsigned char namespace_2 = 'y';
         ec.indices.push_back(namespace_1); //134, x86
         ec.indices.push_back(namespace_2); //135 x87
         ec.num_features = 0;
@@ -352,6 +393,21 @@ namespace memory_tree_ns
             nl = 0.001; //initilze to 1, as we need to do nl/nr.
             nr = 0.001; 
             examples_index = v_init<uint32_t>();
+        }
+    };
+
+    struct score_label
+    {
+        uint32_t label;
+        float score;
+        score_label()
+        {
+            label = 0;
+            score = 0;
+        }
+        score_label(uint32_t l, float s){
+            label = l;
+            score = s;
         }
     };
 
@@ -457,6 +513,7 @@ namespace memory_tree_ns
 
     void init_tree(memory_tree& b)
     {
+        srand48(4000);
         //simple initilization: initilize the root only
         b.routers_used = 0;
         b.nodes.push_back(node());
@@ -637,6 +694,54 @@ namespace memory_tree_ns
         }
     }
 
+    uint32_t majority_vote(memory_tree& b, base_learner& base, const uint32_t cn, example& ec)
+    {
+        if(b.nodes[cn].examples_index.size() > 0){
+            v_array<score_label> score_labs = v_init<score_label>();
+            for(size_t i = 0; i < b.nodes[cn].examples_index.size(); i++){
+                float score = 0.f;
+                uint32_t loc = b.nodes[cn].examples_index[i];
+                if (b.learn_at_leaf == true){
+                    //cout<<"learn at leaf"<<endl;
+                    example* kprod_ec = &calloc_or_throw<example>();
+                    diag_kronecker_product_test(ec, *b.examples[loc], *kprod_ec);
+                    kprod_ec->l.simple = {-1., 1., 0.};
+                    base.predict(*kprod_ec, b.max_routers);
+                    //score = kprod_ec->pred.scalar;
+                    score = kprod_ec->partial_prediction;
+                    free_example(kprod_ec);
+                }
+                else
+                    score = normalized_linear_prod(b, &ec, b.examples[loc]);
+                
+                bool in = false;
+                for (score_label& s_l : score_labs){
+                    if (s_l.label == b.examples[loc]->l.multi.label ){
+                        s_l.score += exp(50.*(score));
+                        in = true;
+                        break;
+                    }
+                }
+                if (in == false)
+                    score_labs.push_back(score_label(b.examples[loc]->l.multi.label, score));   
+            }
+            float max_score = -FLT_MAX;
+            uint32_t max_lab = 0;
+            for (size_t j = 0; j < score_labs.size(); j++){
+                if (score_labs[j].score > max_score)
+                {
+                    max_score = score_labs[j].score;
+                    max_lab = score_labs[j].label;
+                }
+            }
+            return max_lab;
+        }
+        else
+            return 0;
+    }
+
+
+
 
     //pick up the "closest" example in the leaf using the score function.
     int64_t pick_nearest(memory_tree& b, base_learner& base, const uint32_t cn, example& ec)
@@ -652,9 +757,11 @@ namespace memory_tree_ns
 
                 if (b.learn_at_leaf == true){
                     //cout<<"learn at leaf"<<endl;
+                    float tmp_s = normalized_linear_prod(b, &ec, b.examples[loc]);
+                    //tmp_s = 0;
                     example* kprod_ec = &calloc_or_throw<example>();
-                    diag_kronecker_product(ec, *b.examples[loc], *kprod_ec);
-                    kprod_ec->l.simple = {-1., 1., 0.};
+                    diag_kronecker_product_test(ec, *b.examples[loc], *kprod_ec);
+                    kprod_ec->l.simple = {FLT_MAX, 1., tmp_s};
                     base.predict(*kprod_ec, b.max_routers);
                     //score = kprod_ec->pred.scalar;
                     score = kprod_ec->partial_prediction;
@@ -682,14 +789,15 @@ namespace memory_tree_ns
             example* ec_loc = b.examples[loc];
             //float score = -compute_l2_distance(b, &ec, ec_loc); //score based on the l2_distance. 
             float score = normalized_linear_prod(b, &ec, ec_loc);
-            score = 0.0;
+            //score = 0.0;
             example* kprod_ec = &calloc_or_throw<example>();
-            diag_kronecker_product(ec, *ec_loc, *kprod_ec);
+            diag_kronecker_product_test(ec, *ec_loc, *kprod_ec);
+            //
             if (ec.l.multi.label == b.examples[loc]->l.multi.label) //reward = 1:    
-                kprod_ec->l.simple = {1., 1., score};
+                kprod_ec->l.simple = {1., 1., -score};
             else
-                kprod_ec->l.simple = {-1., 1., score}; //reward = 0:
-                //kprod_ec->l.simple = {0., 1., score};
+                //kprod_ec->l.simple = {-1., 1., score}; //reward = 0:
+                kprod_ec->l.simple = {-0., 1., -score};
         
             base.learn(*kprod_ec, b.max_routers);
             free_example(kprod_ec);
@@ -701,7 +809,7 @@ namespace memory_tree_ns
         example& ec = calloc_or_throw<example>();
         //ec = *b.examples[b.iter];
         copy_example_data(&ec, &test_ec);
-        //remove_repeat_features_in_ec(ec);
+        remove_repeat_features_in_ec(ec);
         
         MULTICLASS::label_t mc = ec.l.multi;
         uint32_t save_multi_pred = ec.pred.multiclass;
@@ -718,6 +826,23 @@ namespace memory_tree_ns
         ec.l.multi = mc; 
         ec.pred.multiclass = save_multi_pred;
 
+        
+        /*
+        uint32_t label = majority_vote(b, base, cn, ec);
+        if (label != 0)
+        {
+            ec.pred.multiclass = label;
+            test_ec.pred.multiclass = label;
+            if(test_ec.pred.multiclass != test_ec.l.multi.label){
+                test_ec.loss = test_ec.weight; //weight in default is 1.
+                b.num_mistakes++;
+            }
+        }
+        else{
+            test_ec.loss = test_ec.weight;
+            b.num_mistakes++;
+        }*/
+
         int64_t closest_ec = pick_nearest(b, base, cn, ec);
         if (closest_ec != -1){
             ec.pred.multiclass = b.examples[closest_ec]->l.multi.label;
@@ -732,6 +857,7 @@ namespace memory_tree_ns
             test_ec.loss = test_ec.weight;
             b.num_mistakes++;
         }
+
         free_example(&ec);
     }
 
@@ -801,7 +927,7 @@ namespace memory_tree_ns
 
             example* new_ec = &calloc_or_throw<example>();
             copy_example_data(new_ec, &ec);
-            //remove_repeat_features_in_ec(*new_ec); ////sort unique.
+            remove_repeat_features_in_ec(*new_ec); ////sort unique.
             b.examples.push_back(new_ec);   
             b.num_ecs++; 
 
