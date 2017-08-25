@@ -627,9 +627,10 @@ namespace memory_tree_ns
         b.nodes[right_child].internal = -1;  //right leaf
         b.nodes[right_child].base_router = (b.routers_used++); 
 
-        if (b.nodes[cn].depth + 1 > b.max_depth)
+        if (b.nodes[cn].depth + 1 > b.max_depth){
             b.max_depth = b.nodes[cn].depth + 1;
-        //cout<<b.max_depth<<endl;
+            cout<<b.max_depth<<endl;
+        }
 
         b.nodes[cn].left = left_child;
         b.nodes[cn].right = right_child;

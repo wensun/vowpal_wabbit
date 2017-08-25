@@ -318,9 +318,10 @@ namespace memory_tree_rew_ns
 
                 if (b.learn_at_leaf == true){
                     //cout<<"learn at leaf"<<endl;
+                    float tmp_s = normalized_linear_prod(b, &ec, b.examples[loc]);
                     example* kprod_ec = &calloc_or_throw<example>();
                     diag_kronecker_product(ec, *b.examples[loc], *kprod_ec);
-                    kprod_ec->l.simple = {-1., 1., 0.};
+                    kprod_ec->l.simple = {-1., 1., tmp_s};
                     base.predict(*kprod_ec, b.max_routers);
                     score = kprod_ec->partial_prediction;
                     free_example(kprod_ec);
@@ -533,11 +534,12 @@ namespace memory_tree_rew_ns
         {
             example* ec_loc = b.examples[loc];
             example* kprod_ec = &calloc_or_throw<example>();
+            float score = normalized_linear_prod(b, &ec, ec_loc);
             diag_kronecker_product(ec, *ec_loc, *kprod_ec);
             float rew = get_reward(ec, *ec_loc);
             //if (rew == 0)
             //    rew = -1.;
-            kprod_ec->l.simple = {rew, 1., 0.}; //regressor;
+            kprod_ec->l.simple = {rew, 1., -score}; //regressor;
             base.learn(*kprod_ec, b.max_routers);
             free_example(kprod_ec);
         }

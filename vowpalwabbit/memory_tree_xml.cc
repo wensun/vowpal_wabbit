@@ -599,7 +599,7 @@ namespace memory_tree_xml_ns
                 bool in = false;
                 for (score_label& s_l : score_labs){
                     if (lab == s_l.label){ //this lab is in score_labs array
-                        s_l.score += exp(1.*(score));
+                        s_l.score += exp(5.*(score));
                         in = true;
                         break;
                     }
