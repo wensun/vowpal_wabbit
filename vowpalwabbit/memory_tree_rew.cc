@@ -282,7 +282,6 @@ namespace memory_tree_rew_ns
                 cout<<"Error:  nl = 0, and nr = 0, exit...";
                 exit(0);
             }
-            
             if (pred < 0){
                 if (decrease_count == true)
                     b.nodes[cn].nl--;
@@ -303,6 +302,40 @@ namespace memory_tree_rew_ns
         else    //leaf that has zero examples. 
             return -1;
     }
+
+    //randomize the routing procedure.
+    //lambda = 1: pure random sample; lambda = 0: random based on prediction only.
+    inline int random_routing_to_leaf(memory_tree& b, base_learner& base, 
+            uint32_t& cn, example& ec, float& sample_p, const float lambda = 0.2)
+    {
+        sample_p = 1.0;
+        MULTICLASS::label_t mc = ec.l.multi;
+        uint32_t save_pred = ec.pred.multiclass;
+        ec.l.simple = {FLT_MAX, 1.0, 0.};
+        while (b.nodes[cn].internal == 1){
+            base.predict(ec, b.nodes[cn].base_router);
+            float prob_right = exp(ec.pred.scalar)/(1.+exp(ec.pred.scalar));
+            prob_right = (1.-lambda)*prob_right + lambda*(b.nodes[cn].nr/(b.nodes[cn].nr+b.nodes[cn].nl+0.00001));
+            if (merand48(b.all->random_state) <= prob_right){
+                cn = b.nodes[cn].right;
+                sample_p *= prob_right;
+            }
+            else{
+                cn = b.nodes[cn].left;
+                sample_p *= (1. - prob_right);
+            }
+        }
+        ec.l.multi = mc;
+        ec.pred.multiclass = save_pred;
+        if (b.nodes[cn].examples_index.size() >= 1){
+            int loc_at_leaf = int(merand48(b.all->random_state)*b.nodes[cn].examples_index.size());
+            sample_p *= 1./(b.nodes[cn].examples_index.size());
+            return loc_at_leaf;
+        }
+        else
+            return -1;
+    }
+
 
     //pick up the "closest" example in the leaf using the score function.
     int64_t pick_nearest(memory_tree& b, base_learner& base, const uint32_t cn, example& ec, bool uniform_sample = false)
@@ -397,6 +430,8 @@ namespace memory_tree_rew_ns
         return 0.;
     }
 
+    //memory_tree& b, base_learner& base, 
+    //uint32_t& cn, example& ec, float& sample_p, const float lambda = 0.2
     float train_node(memory_tree& b, base_learner& base, example& ec, const uint32_t cn)
     {
         int sample_repeat = log(b.max_nodes/2.*b.max_leaf_examples)/log(2.)*10.;
@@ -410,10 +445,12 @@ namespace memory_tree_rew_ns
         for (int repeat = 0; repeat <= sample_repeat; repeat++){
             uint32_t cn_left = b.nodes[cn].left;
             uint32_t cn_right = b.nodes[cn].right;
-            int loc_at_left_leaf = random_sample_example_pop(b, cn_left, false);
-            int loc_at_right_leaf = random_sample_example_pop(b, cn_right, false);
-            rew_left += (loc_at_left_leaf == -1 ? 0.:get_reward(ec, *b.examples[b.nodes[cn_left].examples_index[loc_at_left_leaf]]));
-            rew_right+= (loc_at_right_leaf== -1 ? 0.:get_reward(ec, *b.examples[b.nodes[cn_right].examples_index[loc_at_right_leaf]]));
+            float left_sample_p = 1.0; //int loc_at_left_leaf = random_sample_example_pop(b, cn_left, false);
+            int loc_at_left_leaf = random_routing_to_leaf(b, base, cn_left, ec, left_sample_p);
+            float right_sample_p = 1.0; //int loc_at_right_leaf = random_sample_example_pop(b, cn_right, false);
+            int loc_at_right_leaf= random_routing_to_leaf(b, base, cn_right,ec, right_sample_p);
+            rew_left += (loc_at_left_leaf == -1 ? 0.:get_reward(ec, *b.examples[b.nodes[cn_left].examples_index[loc_at_left_leaf]]))/left_sample_p/b.nodes[cn].nl;
+            rew_right+= (loc_at_right_leaf== -1 ? 0.:get_reward(ec, *b.examples[b.nodes[cn_right].examples_index[loc_at_right_leaf]]))/right_sample_p/b.nodes[cn].nr;
         }
         rew_left /= (sample_repeat*1.0);
         rew_right /= (sample_repeat*1.0);
@@ -443,51 +480,6 @@ namespace memory_tree_rew_ns
             b.nodes[cn].bar_rew_R = beta*b.nodes[cn].bar_rew_R + (1.-beta)*rew_right;
         return save_pred_scalar;
     }
-
-    float train_node_old(memory_tree& b, base_learner& base, example& ec, const uint32_t cn, bool uniform_sample = false)
-    {
-        if (b.nodes[cn].internal == -1){ //leaf: do nothing. 
-            cout<<"Error: Train_node is called at a leaf.."<<endl;
-            return 0.f;
-        }
-        //float rew_left = routing_grab_reward_depth_one(b, base, ec, b.nodes[cn].left);
-        //float rew_right= routing_grab_reward_depth_one(b, base, ec, b.nodes[cn].right);
-        float rew_left = routing_grab_reward(b, base, ec, b.nodes[cn].left, 0, 2);
-        float rew_right = routing_grab_reward(b, base, ec, b.nodes[cn].right, 0, 2);
-        
-        //float rew_left = routing_grab_reward_depth_zero(b, base, ec, b.nodes[cn].left);
-        //float rew_right = routing_grab_reward_depth_zero(b,base, ec, b.nodes[cn].right);
-
-
-        /*uint32_t left_routed_leaf = routing(b, b.nodes[cn].left, base, ec);
-        uint32_t right_routed_leaf = routing(b, b.nodes[cn].right, base, ec);
-        int64_t left_closest_ec = pick_nearest(b, base, left_routed_leaf, ec, uniform_sample);
-        int64_t right_closest_ec = pick_nearest(b, base, right_routed_leaf, ec, uniform_sample);
-        float rew_left = 0.f;
-        if (left_closest_ec != -1)
-            rew_left = get_reward(ec, *b.examples[left_closest_ec]);
-        float rew_right = 0.f;
-        if (right_closest_ec != -1)
-            rew_right = get_reward(ec, *b.examples[right_closest_ec]);*/
-
-        //float delta_r_l = (b.nodes[cn].nr+1.)/(b.nodes[cn].nl+1.+b.nodes[cn].nr)*rew_right - (b.nodes[cn].nl+1.)/(b.nodes[cn].nl+1.+b.nodes[cn].nr)*rew_left; 
-        float delta_r_l = rew_right - rew_left; 
-        float balanced = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha*(delta_r_l); //regularization for balance.
-        float route_label = (balanced <= 0 ? -1.f : 1.f);
-
-        MULTICLASS::label_t mc = ec.l.multi;
-        uint32_t save_multi_pred = ec.pred.multiclass;
-        ec.l.simple = {route_label, fabs(balanced), 0.f};
-        //ec.l.simple = {route_label, 1.f, 0.f};
-        base.learn(ec, b.nodes[cn].base_router);
-        base.predict(ec, b.nodes[cn].base_router);
-        float save_pred_scalar = ec.pred.scalar;
-        
-        ec.l.multi = mc;
-        ec.pred.multiclass = save_multi_pred;
-        return save_pred_scalar;
-    }
-
 
     void split_leaf(memory_tree& b, base_learner& base, const uint32_t cn)
     {
@@ -841,3 +833,32 @@ base_learner* memory_tree_rew_setup(vw& all)
 
 
 
+
+
+///////
+/*
+float train_node_old(memory_tree& b, base_learner& base, example& ec, const uint32_t cn, bool uniform_sample = false)
+{
+    if (b.nodes[cn].internal == -1){ //leaf: do nothing. 
+        cout<<"Error: Train_node is called at a leaf.."<<endl;
+        return 0.f;
+    }
+    float rew_left = routing_grab_reward(b, base, ec, b.nodes[cn].left, 0, 2);
+    float rew_right = routing_grab_reward(b, base, ec, b.nodes[cn].right, 0, 2);
+     
+    float delta_r_l = rew_right - rew_left; 
+    float balanced = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha*(delta_r_l); //regularization for balance.
+    float route_label = (balanced <= 0 ? -1.f : 1.f);
+
+    MULTICLASS::label_t mc = ec.l.multi;
+    uint32_t save_multi_pred = ec.pred.multiclass;
+    ec.l.simple = {route_label, fabs(balanced), 0.f};
+    //ec.l.simple = {route_label, 1.f, 0.f};
+    base.learn(ec, b.nodes[cn].base_router);
+    base.predict(ec, b.nodes[cn].base_router);
+    float save_pred_scalar = ec.pred.scalar;
+    
+    ec.l.multi = mc;
+    ec.pred.multiclass = save_multi_pred;
+    return save_pred_scalar;
+}*/
