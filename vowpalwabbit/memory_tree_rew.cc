@@ -176,6 +176,7 @@ namespace memory_tree_rew_ns
         size_t max_nodes;
         size_t max_routers;
         float alpha; //for cpt type of update.
+        float lambda;
         size_t routers_used;
         int iter;
 
@@ -197,6 +198,7 @@ namespace memory_tree_rew_ns
             examples = v_init<example*>();
             rewards = v_init<float>();
             alpha = 0.5;
+            lambda = 0.0;
             routers_used = 0;
             iter = 0;
             num_mistakes = 0;
@@ -303,10 +305,23 @@ namespace memory_tree_rew_ns
             return -1;
     }
 
+    float to_prob (float x)
+    { 
+        static const float alpha = 2.0f;
+        // http://stackoverflow.com/questions/2789481/problem-calling-stdmax
+        //return (std::max) (0.f, (std::min) (1.f, 0.5f * (1.0f + alpha * x)));
+        return exp(x)/(1.+exp(x));
+
+        //if (x > 0)
+        //    return 1.;
+        //else
+        //    return 0.;
+    }
+
     //randomize the routing procedure.
     //lambda = 1: pure random sample; lambda = 0: random based on prediction only.
     inline int random_routing_to_leaf(memory_tree& b, base_learner& base, 
-            uint32_t& cn, example& ec, float& sample_p, const float lambda = 0.2)
+            uint32_t& cn, example& ec, float& sample_p)
     {
         sample_p = 1.0;
         MULTICLASS::label_t mc = ec.l.multi;
@@ -314,8 +329,10 @@ namespace memory_tree_rew_ns
         ec.l.simple = {FLT_MAX, 1.0, 0.};
         while (b.nodes[cn].internal == 1){
             base.predict(ec, b.nodes[cn].base_router);
-            float prob_right = exp(ec.pred.scalar)/(1.+exp(ec.pred.scalar));
-            prob_right = (1.-lambda)*prob_right + lambda*(b.nodes[cn].nr/(b.nodes[cn].nr+b.nodes[cn].nl+0.00001));
+            float prob_right = to_prob(ec.pred.scalar);
+            //cout<<prob_right<<endl;
+            //exp(ec.pred.scalar)/(1.+exp(ec.pred.scalar));
+            prob_right = (1.-b.lambda)*prob_right + b.lambda*(b.nodes[cn].nr/(b.nodes[cn].nr+b.nodes[cn].nl+0.00001));
             if (merand48(b.all->random_state) <= prob_right){
                 cn = b.nodes[cn].right;
                 sample_p *= prob_right;
@@ -431,10 +448,10 @@ namespace memory_tree_rew_ns
     }
 
     //memory_tree& b, base_learner& base, 
-    //uint32_t& cn, example& ec, float& sample_p, const float lambda = 0.2
+    //uint32_t& cn, example& ec, float& sample_p, 
     float train_node(memory_tree& b, base_learner& base, example& ec, const uint32_t cn)
     {
-        int sample_repeat = log(b.max_nodes/2.*b.max_leaf_examples)/log(2.)*10.;
+        float sample_repeat = log(b.max_nodes/2.*b.max_leaf_examples)/log(2.)*1.;
         float beta = 0.99;
         if (b.nodes[cn].internal == -1){ //leaf: do nothing. 
             cout<<"Error: Train_node is called at a leaf.."<<endl;
@@ -504,10 +521,15 @@ namespace memory_tree_rew_ns
         b.nodes[left_child].depth = b.nodes[cn].depth + 1;
         b.nodes[right_child].depth = b.nodes[cn].depth + 1;
 
+        if (b.nodes[cn].depth+1 > b.max_depth){
+            b.max_depth = b.nodes[cn].depth + 1;
+            cout<<"max depth increase to "<<b.max_depth<<endl;
+        }
+
         for (size_t ec_id = 0; ec_id < b.nodes[cn].examples_index.size(); ec_id++)
         {
             uint32_t ec_pos = b.nodes[cn].examples_index[ec_id];
-            float pred_scalar = train_node(b, base, *b.examples[ec_pos], cn); //train and pred, pick example in the leaf uniformly random:
+            float pred_scalar = train_node(b, base, *b.examples[ec_pos], cn); //train and pred, 
             if (pred_scalar <= 0){ //go left
                 b.nodes[left_child].examples_index.push_back(ec_pos);
                 b.nodes[cn].nl += 1;    
@@ -787,7 +809,8 @@ base_learner* memory_tree_rew_setup(vw& all)
     new_options(all, "memory tree (reward guided) options")
       ("leaf_example_multiplier", po::value<uint32_t>()->default_value(1.0), "multiplier on examples per leaf (default = log nodes)")
       ("learn_at_leaf", po::value<bool>()->default_value(true), "whether or not learn at leaf (defualt = True)")
-      ("Alpha", po::value<float>()->default_value(0.5), "Alpha");
+      ("Alpha", po::value<float>()->default_value(0.5), "Alpha")
+      ("Lambda", po::value<float>()->default_value(0.1), "Lambda");
      add_options(all);
 
     po::variables_map& vm = all.vm;
@@ -802,19 +825,24 @@ base_learner* memory_tree_rew_setup(vw& all)
 	*all.file_options << " --leaf_example_multiplier " << vm["leaf_example_multiplier"].as<uint32_t>();
       }
     if (vm.count("Alpha"))
-      {
-	tree.alpha = vm["Alpha"].as<float>();
-	*all.file_options << " --Alpha " << tree.alpha;
-      }
+    {
+	    tree.alpha = vm["Alpha"].as<float>();
+	    *all.file_options << " --Alpha " << tree.alpha;
+    }
+    if (vm.count("Lambda"))
+    {
+        tree.lambda = vm["Lambda"].as<float>();
+        *all.file_options << " --Lambda " <<tree.lambda;
+    }
     
-
     init_tree(tree);
 
     if (! all.quiet)
         all.trace_message << "memory_tree_rew:" << " "
                     <<"max_nodes = "<< tree.max_nodes << " " 
                     <<"max_leaf_examples = "<<tree.max_leaf_examples<<" "
-                    <<"alpha = "<<tree.alpha
+                    <<"alpha = "<<tree.alpha<<" "
+                    <<"Lambda = "<<tree.lambda
                     <<std::endl;
     
     learner<memory_tree>& l = 
