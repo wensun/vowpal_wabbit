@@ -8,6 +8,7 @@
 #include "reductions.h"
 #include "rand48.h"
 #include "vw.h"
+#include "bleu.h"
 
 
 using namespace std;
