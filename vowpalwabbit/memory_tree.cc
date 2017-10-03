@@ -796,7 +796,7 @@ namespace memory_tree_ns
         if (b.test_mode == false){
             b.iter++;
             predict(b, base, ec);
-            if (b.iter%100 == 0)
+            if (b.iter%5000 == 0)
                 //cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
                 cout<<"at iter "<<b.iter<<", average reward: "<<b.total_reward*1./b.iter<<endl;
 
