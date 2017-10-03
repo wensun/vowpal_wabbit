@@ -201,17 +201,19 @@ namespace memory_tree_ns
         }
     }
 
+    inline float square_norm_feature(features& fs){
+        double total_feat_sum_sq = 0.;
+        for (size_t t = 0; t < fs.values.size(); t++)
+            total_feat_sum_sq += pow(fs.values[t],2);
+        return total_feat_sum_sq;
+    }
 
     float compute_similarity_under_namespace(example& ec1, example& ec2, unsigned char ns)
     {
         features& f1 = ec1.feature_space[ns];
         features& f2 = ec2.feature_space[ns];
-        double f1_feat_sum_sq = 0.;
-        double f2_feat_sum_sq = 0.;
-        for (size_t t = 0; t < f1.values.size(); t++)
-            f1_feat_sum_sq+=pow(f1.values[t], 2);
-        for (size_t t = 0; t < f2.values.size(); t++)
-            f2_feat_sum_sq+=pow(f2.values[t], 2);
+        double f1_feat_sum_sq = square_norm_feature(f1);
+        double f2_feat_sum_sq = square_norm_feature(f2);
         //compute the innner product between these twos:
         float dotprod = inner_product_two_features(f1, f2, f1_feat_sum_sq, f2_feat_sum_sq);
         return dotprod;
@@ -405,8 +407,10 @@ namespace memory_tree_ns
             return linear_prod/pow(fec1->total_sum_feat_sq*fec2->total_sum_feat_sq, 0.5);
         }
         else if (b.task_id == 2){
-            float linear_prod = inner_product_two_features(ec1->feature_space[b.Q], ec2->feature_space[b.Q]); //joints.
-            return linear_prod/pow((ec1->total_sum_feat_sq-1.)*(ec2->total_sum_feat_sq-1.),0.5);
+            double f1_feat_sum_sq = square_norm_feature(ec1->feature_space[b.Q]);
+            double f2_feat_sum_sq = square_norm_feature(ec2->feature_space[b.Q]);
+            float linear_prod = inner_product_two_features(ec1->feature_space[b.Q], ec2->feature_space[b.Q], f1_feat_sum_sq,f2_feat_sum_sq); //joints.
+            return linear_prod;
         }
         return 0;
     }
