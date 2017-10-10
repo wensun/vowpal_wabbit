@@ -185,7 +185,7 @@ namespace memory_tree_ns
                 }
             }
         }
-        else if (task_id == 2) //Q and A (J and I)
+        else if (task_id != 1) //Q and A (J and I)
         {
             unsigned char ns = 'J';
             copy_example_data(&ec, &ec1, true);
@@ -407,7 +407,7 @@ namespace memory_tree_ns
             free(fec2);
             return linear_prod/pow(fec1->total_sum_feat_sq*fec2->total_sum_feat_sq, 0.5);
         }
-        else if (b.task_id == 2){
+        else if (b.task_id != 1){
             double f1_feat_sum_sq = square_norm_feature(ec1->feature_space[b.Q]);
             double f2_feat_sum_sq = square_norm_feature(ec2->feature_space[b.Q]);
             float linear_prod = inner_product_two_features(ec1->feature_space[b.Q], ec2->feature_space[b.Q], f1_feat_sum_sq,f2_feat_sum_sq); //joints.
@@ -505,7 +505,7 @@ namespace memory_tree_ns
         if (b.task_id == 1){
             copy_example_data(&ec, &ec_0, false);
         }
-        else if (b.task_id == 2){
+        else if (b.task_id != 1){
             copy_example_data(&ec, &ec_0, true); //no feat is true here
             ec.indices.push_back(b.Q);
             ec.feature_space[b.Q].deep_copy_from(ec_0.feature_space[b.Q]); //joints 
@@ -572,7 +572,7 @@ namespace memory_tree_ns
             example& tmp_ec = calloc_or_throw<example>();
             if (b.task_id == 1)
                 copy_example_data(&tmp_ec, b.examples[ec_pos]);
-            else if (b.task_id == 2){
+            else if (b.task_id != 1){
                 copy_example_data(&tmp_ec, b.examples[ec_pos], true);
                 tmp_ec.indices.push_back(b.Q);
                 tmp_ec.feature_space[b.Q].deep_copy_from(b.examples[ec_pos]->feature_space[b.Q]);
@@ -676,6 +676,9 @@ namespace memory_tree_ns
         else if (b.task_id == 2){ //J and I
             reward = compute_similarity_under_namespace(ec, retrieved_ec, b.A);  //use the image part to compute the reward.
         }
+        else if (b.task_id == 3){
+            reward = bleu(ec.feature_space[b.A].indicies, retrieved_ec.feature_space[b.A].indicies,4);
+        }
         return reward;
     }
 
@@ -708,7 +711,7 @@ namespace memory_tree_ns
         example& ec = calloc_or_throw<example>();
         if (b.task_id == 1)
             copy_example_data(&ec, &test_ec);
-        else if (b.task_id == 2){
+        else if (b.task_id != 1){
             copy_example_data(&ec, &test_ec, true);
             ec.indices.push_back(b.Q);
             ec.feature_space[b.Q].deep_copy_from(test_ec.feature_space[b.Q]); //use joints.
@@ -793,11 +796,12 @@ namespace memory_tree_ns
     //learn: descent the example from the root while generating binary training
     //example for each node, including the leaf, and store the example at the leaf.
     void learn(memory_tree& b, base_learner& base, example& ec)
-    {        
+    {   
+             
         if (b.test_mode == false){
             b.iter++;
             predict(b, base, ec);
-            if (b.iter%5000 == 0)
+            if (b.iter%10000 == 0)
                 //cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
                 cout<<"at iter "<<b.iter<<", average reward: "<<b.total_reward*1./b.iter<<endl;
 
@@ -1005,7 +1009,7 @@ base_learner* memory_tree_setup(vw& all)
     new_options(all, "memory tree options")
       ("leaf_example_multiplier", po::value<uint32_t>()->default_value(1.0), "multiplier on examples per leaf (default = log nodes)")
       ("learn_at_leaf", po::value<bool>()->default_value(true), "whether or not learn at leaf (defualt = True)")
-      ("task", po::value<uint32_t>()->default_value(1.), "task: 1:multiclass; 2:Q&A")
+      ("task", po::value<uint32_t>()->default_value(1.), "task: 1:multiclass; 2: Robot Configuration; 3:Q&A with bleu as reward")
       ("Alpha", po::value<float>()->default_value(0.1), "Alpha");
      add_options(all);
 

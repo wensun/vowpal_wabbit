@@ -8,6 +8,7 @@
 #include "reductions.h"
 #include "rand48.h"
 #include "vw.h"
+#include "bleu.h"
 
 
 using namespace std;
@@ -172,7 +173,7 @@ namespace memory_tree_rew_ns
                 }
             }
         }
-        else if (task_id == 2){
+        else if (task_id != 1){
             copy_example_data(&ec, &ec1, true); //no_feature: true
             ec.indices.push_back(ns);
             ec.feature_space[ns].deep_copy_from(ec1.feature_space[ns]);
@@ -293,7 +294,7 @@ namespace memory_tree_rew_ns
             free(fec2);
             return linear_prod/pow(fec1->total_sum_feat_sq*fec2->total_sum_feat_sq, 0.5);
         }
-        else if (b.task_id == 2){
+        else if (b.task_id != 1){
             double f1_feat_sum_sq = square_norm_feature(ec1->feature_space[b.Q]);
             double f2_feat_sum_sq = square_norm_feature(ec2->feature_space[b.Q]);
             float linear_prod = inner_product_two_features(ec1->feature_space[b.Q], ec2->feature_space[b.Q], f1_feat_sum_sq,f2_feat_sum_sq); //joints.
@@ -323,7 +324,7 @@ namespace memory_tree_rew_ns
     void copy_example(memory_tree& b, example* ec_0, example* ec_dst){
         if (b.task_id == 1)
             copy_example_data(ec_dst, ec_0, false);
-        else if (b.task_id == 2){
+        else if (b.task_id != 1){
             copy_example_data(ec_dst, ec_0, true); //no feature: true.
             ec_dst->indices.push_back(b.Q); //joints for robot data
             ec_dst->feature_space[b.Q].deep_copy_from(ec_0->feature_space[b.Q]);
@@ -482,8 +483,7 @@ namespace memory_tree_rew_ns
     inline float get_reward(memory_tree& b,  example& ec, example& retrieved_ec)
     {
         float reward = 0.;
-        if (b.task_id == 1)
-        {    //multi-class:
+        if (b.task_id == 1){    //multi-class:
             if (ec.l.multi.label == retrieved_ec.l.multi.label)
                 reward = 1.;
             else
@@ -491,6 +491,10 @@ namespace memory_tree_rew_ns
         }
         else if (b.task_id == 2){ //J and I
             reward = compute_similarity_under_namespace(ec, retrieved_ec, b.A);  //use the image part to compute the reward.
+        }
+        else if (b.task_id == 3){ //ask ubuntu q and A, where A is measured by bleu score.
+            reward = bleu(ec.feature_space[b.A].indicies, retrieved_ec.feature_space[b.A].indicies, 4); //use max 2-gram
+            //reward = 0.;
         }
         return reward;
     }
@@ -667,7 +671,7 @@ namespace memory_tree_rew_ns
         b.iter++;
         if (b.test_mode == false){
             predict(b, base, ec); 
-            if (b.iter%1000 == 0)
+            if (b.iter%5000 == 0)
                 //cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
                 cout<<"at iter "<<b.iter<<", average reward: "<<b.total_reward*1./b.iter<<endl;
 
@@ -866,7 +870,7 @@ base_learner* memory_tree_rew_setup(vw& all)
     new_options(all, "memory tree (reward guided) options")
       ("leaf_example_multiplier", po::value<uint32_t>()->default_value(1.0), "multiplier on examples per leaf (default = log nodes)")
       ("learn_at_leaf", po::value<bool>()->default_value(true), "whether or not learn at leaf (defualt = True)")
-      ("task", po::value<uint32_t>()->default_value(1.), "task: 1:multiclass; 2:Q&A")
+      ("task", po::value<uint32_t>()->default_value(1.), "task: 1:multiclass; 2:Robot Configuration; 3: Q & A with bleu as reward")
       ("Alpha", po::value<float>()->default_value(0.5), "Alpha")
       ("Lambda", po::value<float>()->default_value(0.1), "Lambda");
      add_options(all);

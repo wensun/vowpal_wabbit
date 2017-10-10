@@ -17,6 +17,7 @@ struct ngram
         for (size_t t = 0; t < n; t ++)
             indexes.push_back(index[start+t]);
     }
+
 };
 
 inline bool two_ngrams_equal(const ngram& ngram1, const ngram& ngram2)
@@ -85,6 +86,15 @@ inline float ngram_precision(const v_array<ngram>& candidate_ngrams, const v_arr
     return dist_total_counts*1./(len_can+1e-7);
 }
 
+
+inline void free_ngram_array(v_array<ngram> ngram_list){
+    for (size_t t = 0; t < ngram_list.size(); t++)
+    {
+        ngram_list[t].indexes.delete_v();
+    }
+    ngram_list.delete_v();
+}
+
 inline float bleu(const v_array<uint64_t>& candidate, const v_array<uint64_t>& reference, int max_n_gram = 4)
 {
     float len_ratio = candidate.size()*1./(reference.size()+1e-7);
@@ -96,8 +106,11 @@ inline float bleu(const v_array<uint64_t>& candidate, const v_array<uint64_t>& r
         create_ngram(i, candidate, ngram_candidate);
         create_ngram(i, reference, ngram_reference);
         float p_i = ngram_precision(ngram_candidate, ngram_reference);
-        std::cout<<i<<" "<<p_i<<std::endl;
+        //std::cout<<i<<" "<<p_i<<std::endl;
         precision*=p_i;
+
+        free_ngram_array(ngram_candidate);
+        free_ngram_array(ngram_reference);
     }
     float bleu = brevity * pow(precision, 1./(max_n_gram));
     return bleu;
