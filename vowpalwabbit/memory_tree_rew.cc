@@ -4,7 +4,7 @@
 #include <float.h>
 #include <time.h>
 #include <sstream>
-
+#include <ctime>
 #include "reductions.h"
 #include "rand48.h"
 #include "vw.h"
@@ -88,6 +88,7 @@ namespace memory_tree_rew_ns
         if (fs_2.indicies.size() == 0)
             return 0.f;
         int numint = 0;
+        
         for (size_t idx1 = 0, idx2 = 0; idx1 < fs_1.size() && idx2 < fs_2.size() ; idx1++)
         { 
             uint64_t ec1pos = fs_1.indicies[idx1];
@@ -107,6 +108,35 @@ namespace memory_tree_rew_ns
         }
         return (dotprod/pow(norm_sq1*norm_sq2, 0.5));
     }
+
+     void remove_repeat_features_in_f(features& f, float& total_sum_feat_sq )
+    {
+        for (size_t i = 0; i < f.indicies.size(); i++){
+            if (f.values[i] != -FLT_MAX){
+                uint64_t loc = f.indicies[i];
+                for (size_t j = i+1; j < f.indicies.size(); j++){
+                    if (loc == f.indicies[j]){
+                        total_sum_feat_sq -= (f.values[i]*f.values[i] + f.values[j]*f.values[j]);
+                        f.values[i] += f.values[j];
+                        total_sum_feat_sq += f.values[i]*f.values[i];
+                        f.values[j] = -FLT_MAX;
+                    }
+                }
+            }
+        }
+        for (size_t i = 0; i < f.indicies.size(); i++){
+            if (f.values[i] == -FLT_MAX)
+                f.values[i] = 0.0;
+        }
+    }
+    
+    void remove_repeat_features_in_ec(example& ec)
+    {
+        for (auto nc : ec.indices)
+            remove_repeat_features_in_f(ec.feature_space[nc], ec.total_sum_feat_sq);
+    }
+
+
 
     float linear_kernel(const flat_example* fec1, const flat_example* fec2)
     { 
@@ -141,13 +171,13 @@ namespace memory_tree_rew_ns
             }
         }
         
-        /*for (size_t i2 = 0; i2 < tmp_f2_indicies.size(); i2++){
-            if (tmp_f2_indicies[i2] != 0){
-                float value = 0.0 - fabs(f2.values[i2]/pow(norm_sq2,0.5));
-                f1.push_back(value, f2.indicies[i2]);
-                total_sum_feat_sq += pow(value, 2);
-            }
-        }*/
+        //for (size_t i2 = 0; i2 < tmp_f2_indicies.size(); i2++){
+        //    if (tmp_f2_indicies[i2] != 0){
+        //        float value = 0.0 - fabs(f2.values[i2]/pow(norm_sq2,0.5));
+        //        f1.push_back(value, f2.indicies[i2]);
+        //        total_sum_feat_sq += pow(value, 2);
+        //    }
+        //}
         tmp_f2_indicies.delete_v();
     }
 
@@ -256,6 +286,10 @@ namespace memory_tree_rew_ns
         uint32_t test_mistakes;
         bool learn_at_leaf;
         float total_reward;
+        float total_test_reward;
+    
+        float construct_time;
+        float test_time;
 
         bool test_mode;
         uint32_t task_id;
@@ -278,6 +312,9 @@ namespace memory_tree_rew_ns
             max_depth = 0;
             max_ex_in_leaf = 0;
             total_reward = 0.;
+            total_test_reward = 0.;
+            construct_time = 0.;
+            test_time = 0.;
         }
     };
 
@@ -297,6 +334,8 @@ namespace memory_tree_rew_ns
         else if (b.task_id != 1){
             double f1_feat_sum_sq = square_norm_feature(ec1->feature_space[b.Q]);
             double f2_feat_sum_sq = square_norm_feature(ec2->feature_space[b.Q]);
+            //cout<<b.Q<<" "<<f1_feat_sum_sq<<" "<<f2_feat_sum_sq<<endl;
+            //cout<<ec1->feature_space[b.Q].values.size()<<" "<<ec2->feature_space[b.Q].values.size()<<endl;
             float linear_prod = inner_product_two_features(ec1->feature_space[b.Q], ec2->feature_space[b.Q], f1_feat_sum_sq,f2_feat_sum_sq); //joints.
             return linear_prod;
         }
@@ -421,6 +460,7 @@ namespace memory_tree_rew_ns
     //pick up the "closest" example in the leaf using the score function.
     int64_t pick_nearest(memory_tree& b, base_learner& base, const uint32_t cn, example& ec, bool uniform_sample = false)
     {
+
         if (b.nodes[cn].examples_index.size() > 0 && uniform_sample == false)
         {
             float max_score = -FLT_MAX;
@@ -432,16 +472,18 @@ namespace memory_tree_rew_ns
 
                 if (b.learn_at_leaf == true){
                     //cout<<"learn at leaf"<<endl;
-                    //float tmp_s = normalized_linear_prod(b, &ec, b.examples[loc]);
+                    float tmp_s = normalized_linear_prod(b, &ec, b.examples[loc]);
                     example* kprod_ec = &calloc_or_throw<example>();
                     diag_kronecker_product(ec, *b.examples[loc], *kprod_ec, b.task_id, b.Q);
-                    kprod_ec->l.simple = {FLT_MAX, 1., 0.0};
+                    kprod_ec->l.simple = {FLT_MAX, 1., 0*(tmp_s - 0.5)};
                     base.predict(*kprod_ec, b.max_routers);
                     score = kprod_ec->partial_prediction;
                     free_example(kprod_ec);
                 }
-                else
+                else{
                     score = normalized_linear_prod(b, &ec, b.examples[loc]);
+                    //cout<<score<<endl;
+                }
                 
                 if (score > max_score){
                     max_score = score;
@@ -604,12 +646,13 @@ namespace memory_tree_rew_ns
         {
             example* ec_loc = b.examples[loc];
             example* kprod_ec = &calloc_or_throw<example>();
-            //float score = normalized_linear_prod(b, &ec, ec_loc);
+            float score = normalized_linear_prod(b, &ec, ec_loc);
             diag_kronecker_product(ec, *ec_loc, *kprod_ec, b.task_id, b.Q);
             float rew = get_reward(b, ec, *ec_loc);
             //if (rew == 0)
             //    rew = -1.;
-            kprod_ec->l.simple = {rew, 1., -0.}; //regressor;
+            //float label = ((rew - 0.5 > 0) ? 1.:-1.);
+            kprod_ec->l.simple = {rew, 1., 0*(score - 0.5)}; //regressor;
             base.learn(*kprod_ec, b.max_routers);
             free_example(kprod_ec);
         }
@@ -654,30 +697,45 @@ namespace memory_tree_rew_ns
 
     void predict(memory_tree& b, base_learner& base, example& ec)
     {
+        remove_repeat_features_in_ec(ec);
         uint32_t cn = routing(b, 0, base, ec);
         int64_t closest_ec = pick_nearest(b,base,cn,ec);
         float rew = (closest_ec == -1 ? 0.f : get_reward(b, ec, *b.examples[closest_ec]));
+        
+        //if (b.test_mode == true)
+        //    cout<<rew<<endl;
 
         if (closest_ec != -1){
             ec.pred.multiclass = b.examples[closest_ec]->l.multi.label;
         }
         b.total_reward += rew;
+
+        //if (b.iter > 173551*2)
+        if (b.iter > 900 * 2)    
+        //if (b.iter > 7000*2)
+            b.total_test_reward += rew;
+
         ec.loss = (1. - rew)*ec.weight; //convert reward to loss.
         b.num_mistakes += ec.loss;
     }
 
     void learn(memory_tree& b, base_learner& base, example& ec)
     {
+        //int32_t train_N = 173551*2;
+        int32_t train_N = 900*2;
+        //int32_t train_N = 7000*2;
         b.iter++;
-        if (b.test_mode == false){
+        //if (b.test_mode == false){
+        if (b.iter <= train_N){
             predict(b, base, ec); 
-            if (b.iter%5000 == 0)
+            if (b.iter%2000 == 0)
                 //cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
                 cout<<"at iter "<<b.iter<<", average reward: "<<b.total_reward*1./b.iter<<endl;
-
+            
+            clock_t begin = clock();
             example* new_ec = &calloc_or_throw<example>();
             copy_example_data(new_ec, &ec);
-            //remove_repeat_features_in_ec(*new_ec); ////sort unique.
+            remove_repeat_features_in_ec(*new_ec); ////sort unique.
             b.examples.push_back(new_ec);   
             b.num_ecs++; 
 
@@ -685,11 +743,18 @@ namespace memory_tree_rew_ns
 
             for (int i = 0; i < 1; i++)
                 experience_replay(b, base);
+            clock_t end = clock();
+            double elapsed_secs = double(end - begin) / CLOCKS_PER_SEC;
+            b.construct_time+=elapsed_secs;
         }
-        else if (b.test_mode == true){
-            if (b.iter % 5000 == 0)
-                cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
+        //else if (b.test_mode == true){
+        else if (b.iter > train_N){
+            if ((b.iter-train_N) % 100 == 0)
+                cout<<"at iter "<<b.iter-train_N<<", avg reward: "<<b.total_test_reward*1./(b.iter-train_N)<<endl;
+            clock_t begin = clock();
             predict(b, base, ec);
+            clock_t end = clock();
+            b.test_time += double(end - begin) / CLOCKS_PER_SEC;
         }
 
     }
@@ -703,6 +768,9 @@ namespace memory_tree_rew_ns
             free_example(b.examples[i]);
         b.examples.delete_v();
         cout<<b.max_nodes<<endl;
+        cout<<"reward is "<<b.total_test_reward<<endl;
+        cout<<"construct time "<<b.construct_time<<endl;
+        cout<<"test time "<<b.test_time<<endl;
     }
 
     ///////////////////Save & Load//////////////////////////////////////
@@ -853,8 +921,11 @@ namespace memory_tree_rew_ns
             }
             for (uint32_t i = 0; i < n_examples; i++)
                 save_load_example(b.examples[i], model_file, read, text, msg);
-            
-            
+               
+            if (b.test_mode == true)
+            {
+                cout<<b.max_nodes<<" "<<b.learn_at_leaf<<" "<<b.Q<<" "<<b.A<<" "<<b.task_id<<endl;
+            }       
         }
     }
     //////////////////////////////End of Save & Load///////////////////////////////
@@ -911,7 +982,9 @@ base_learner* memory_tree_rew_setup(vw& all)
                     <<"max_nodes = "<< tree.max_nodes << " " 
                     <<"max_leaf_examples = "<<tree.max_leaf_examples<<" "
                     <<"alpha = "<<tree.alpha<<" "
-                    <<"Lambda = "<<tree.lambda
+                    <<"Lambda = "<<tree.lambda<<" "
+                    <<"task id = "<<tree.task_id<<" "
+                    <<"learn at leaf = "<<tree.learn_at_leaf
                     <<std::endl;
     
     learner<memory_tree>& l = 

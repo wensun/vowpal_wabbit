@@ -56,6 +56,7 @@ license as described in the file LICENSE.
 #include "log_multi.h"
 #include "recall_tree.h"
 #include "memory_tree.h"
+#include "nearest_neighbor.h"
 #include "memory_tree_xml.h"
 #include "memory_tree_rew.h"
 #include "stagewise_poly.h"
@@ -1126,6 +1127,7 @@ void parse_reductions(vw& all)
   all.reduction_stack.push_back(ect_setup);
   all.reduction_stack.push_back(log_multi_setup);
   all.reduction_stack.push_back(recall_tree_setup);
+  all.reduction_stack.push_back(nearest_neighbor_setup);
   all.reduction_stack.push_back(memory_tree_setup);
   all.reduction_stack.push_back(memory_tree_xml_setup);
   all.reduction_stack.push_back(memory_tree_rew_setup);
