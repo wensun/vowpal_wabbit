@@ -4,6 +4,7 @@
 #include <float.h>
 #include <time.h>
 #include <sstream>
+#include <ctime>
 
 #include "reductions.h"
 #include "rand48.h"
@@ -429,6 +430,8 @@ namespace memory_tree_ns
         size_t max_depth;
         size_t max_ex_in_leaf;
 
+        float construct_time;
+        float test_time;
 
         bool path_id_feat;
 
@@ -454,6 +457,8 @@ namespace memory_tree_ns
             test_mode = false;
             max_depth = 0;
             max_ex_in_leaf = 0;
+            construct_time = 0;
+            test_time = 0;
         }
     };
 
@@ -629,7 +634,7 @@ namespace memory_tree_ns
 
         if (b.nodes[cn].depth + 1 > b.max_depth){
             b.max_depth = b.nodes[cn].depth + 1;
-            cout<<b.max_depth<<endl;
+            cout<<"depth "<<b.max_depth<<endl;
         }
 
         b.nodes[cn].left = left_child;
@@ -926,6 +931,7 @@ namespace memory_tree_ns
             if (b.iter%5000 == 0)
                 cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
 
+            clock_t begin = clock();
             example* new_ec = &calloc_or_throw<example>();
             copy_example_data(new_ec, &ec);
             remove_repeat_features_in_ec(*new_ec); ////sort unique.
@@ -943,13 +949,16 @@ namespace memory_tree_ns
             }
             //if (b.iter % 1 == 0)
             for (int i = 0; i < 1; i++)
-                experience_replay(b, base);   
+                experience_replay(b, base);
+            b.construct_time = double(clock() - begin)/CLOCKS_PER_SEC;   
         }
         else if (b.test_mode == true){
             b.iter++;
             if (b.iter % 5000 == 0)
                 cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
+            clock_t begin = clock();
             predict(b, base, ec);
+            b.test_time += double(clock() - begin)/CLOCKS_PER_SEC;
         }
 
     } 
@@ -964,6 +973,7 @@ namespace memory_tree_ns
             free_example(b.examples[i]);
         b.examples.delete_v();
         cout<<b.max_nodes<<endl;
+        cout<<b.construct_time<<" "<<b.test_time<<endl;
     }
 
     ///////////////////Save & Load//////////////////////////////////////
