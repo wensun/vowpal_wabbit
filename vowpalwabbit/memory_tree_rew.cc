@@ -285,6 +285,7 @@ namespace memory_tree_rew_ns
         uint32_t num_test_ecs;
         uint32_t test_mistakes;
         bool learn_at_leaf;
+        bool random_route;
         float total_reward;
         float total_test_reward;
     
@@ -315,6 +316,7 @@ namespace memory_tree_rew_ns
             total_test_reward = 0.;
             construct_time = 0.;
             test_time = 0.;
+            random_route = false;
         }
     };
 
@@ -357,7 +359,10 @@ namespace memory_tree_rew_ns
         cout<<"tree initiazliation is done...."<<endl
             <<"max nodes "<<b.max_nodes<<endl
             <<"tree size: "<<b.nodes.size()<<endl
-            <<"learn at leaf: "<<b.learn_at_leaf<<endl;
+            <<"learn at leaf: "<<b.learn_at_leaf<<endl
+            <<"alpha "<<b.alpha<<endl
+            <<"lambda "<<b.lambda<<endl
+            <<"random_route "<<b.random_route<<endl;
     }
 
     void copy_example(memory_tree& b, example* ec_0, example* ec_dst){
@@ -409,58 +414,26 @@ namespace memory_tree_rew_ns
             return -1;
     }
 
-    float to_prob (float x)
+    float to_prob (memory_tree& b, float x)
     { 
-        static const float alpha = 2.0f;
+        //static const float alpha = 2.0f;
         // http://stackoverflow.com/questions/2789481/problem-calling-stdmax
         //return (std::max) (0.f, (std::min) (1.f, 0.5f * (1.0f + alpha * x)));
-        return exp(x)/(1.+exp(x));
-
-        //if (x > 0)
-        //    return 1.;
-        //else
-        //    return 0.;
+        if (b.random_route == true)
+            return exp(x)/(1.+exp(x));
+        else{
+            if (x > 0)
+                return 1.;
+            else
+                return 0.;
+        }
     }
 
-    //randomize the routing procedure.
-    //lambda = 1: pure random sample; lambda = 0: random based on prediction only.
-    inline int random_routing_to_leaf(memory_tree& b, base_learner& base, 
-            uint32_t& cn, example& ec, float& sample_p)
-    {
-        sample_p = 1.0;
-        example& tmp_ec = calloc_or_throw<example>();
-        copy_example(b, &ec, &tmp_ec);
-        tmp_ec.l.simple = {FLT_MAX, 1.0, 0.};
-        while (b.nodes[cn].internal == 1){
-            base.predict(tmp_ec, b.nodes[cn].base_router);
-            float prob_right = to_prob(tmp_ec.pred.scalar);
-            //cout<<prob_right<<endl;
-            //exp(ec.pred.scalar)/(1.+exp(ec.pred.scalar));
-            prob_right = (1.-b.lambda)*prob_right + b.lambda*(b.nodes[cn].nr/(b.nodes[cn].nr+b.nodes[cn].nl+0.00001));
-            if (merand48(b.all->random_state) <= prob_right){
-                cn = b.nodes[cn].right;
-                sample_p *= prob_right;
-            }
-            else{
-                cn = b.nodes[cn].left;
-                sample_p *= (1. - prob_right);
-            }
-        }
-        free_example(&tmp_ec);
-        if (b.nodes[cn].examples_index.size() >= 1){
-            int loc_at_leaf = int(merand48(b.all->random_state)*b.nodes[cn].examples_index.size());
-            sample_p *= 1./(b.nodes[cn].examples_index.size());
-            return loc_at_leaf;
-        }
-        else
-            return -1;
-    }
 
 
     //pick up the "closest" example in the leaf using the score function.
     int64_t pick_nearest(memory_tree& b, base_learner& base, const uint32_t cn, example& ec, bool uniform_sample = false)
     {
-
         if (b.nodes[cn].examples_index.size() > 0 && uniform_sample == false)
         {
             float max_score = -FLT_MAX;
@@ -482,9 +455,7 @@ namespace memory_tree_rew_ns
                 }
                 else{
                     score = normalized_linear_prod(b, &ec, b.examples[loc]);
-                    //cout<<score<<endl;
                 }
-                
                 if (score > max_score){
                     max_score = score;
                     max_pos = (int64_t)loc;
@@ -494,6 +465,7 @@ namespace memory_tree_rew_ns
         }
         else if(b.nodes[cn].examples_index.size () > 0 && uniform_sample == true) //uniform sample from the leaf.
         {
+            cout<<"sample at leaf"<<endl;
             int loc_at_leaf = int(merand48(b.all->random_state)*b.nodes[cn].examples_index.size());
             int64_t pos = (int64_t)b.nodes[cn].examples_index[loc_at_leaf];
             return pos;
@@ -501,6 +473,51 @@ namespace memory_tree_rew_ns
         else
             return -1;
     }
+
+    
+    //randomize the routing procedure.
+    //lambda = 1: pure random sample; lambda = 0: random based on prediction only.
+    inline int64_t random_routing_to_leaf(memory_tree& b, base_learner& base, 
+            uint32_t& cn, example& ec, float& sample_p)
+    {
+        sample_p = 1.0;
+        example& tmp_ec = calloc_or_throw<example>();
+        copy_example(b, &ec, &tmp_ec);
+        tmp_ec.l.simple = {FLT_MAX, 1.0, 0.};
+        while (b.nodes[cn].internal == 1){
+            base.predict(tmp_ec, b.nodes[cn].base_router);
+            float prob_right = to_prob(b, tmp_ec.pred.scalar);
+            //cout<<prob_right<<endl;
+            //exp(ec.pred.scalar)/(1.+exp(ec.pred.scalar));
+            prob_right = (1.-b.lambda)*prob_right + b.lambda*(b.nodes[cn].nr/(b.nodes[cn].nr+b.nodes[cn].nl+0.00001));
+            if (merand48(b.all->random_state) <= prob_right){
+                cn = b.nodes[cn].right;
+                sample_p *= prob_right;
+            }
+            else{
+                cn = b.nodes[cn].left;
+                sample_p *= (1. - prob_right);
+            }
+        }
+        free_example(&tmp_ec);
+        int64_t pos_in_exp_list = pick_nearest(b,base,cn, ec, b.random_route);
+        return pos_in_exp_list;
+
+        //if (b.random_route == true){
+        //    if (b.nodes[cn].examples_index.size() >= 1){
+        //        int64_t loc_at_leaf = int(merand48(b.all->random_state)*b.nodes[cn].examples_index.size());
+        //        sample_p *= 1./(b.nodes[cn].examples_index.size());
+        //        return loc_at_leaf;
+        //    }
+        //    else
+        //        return -1;
+        //}
+        //else{
+        //    int64_t loc_at_leaf = pick_nearest(b, base, cn, ec);
+        //    return loc_at_leaf;
+        //}
+    }
+
 
 
     inline uint32_t routing(memory_tree& b, const uint32_t& root, base_learner& base, example& ec)
@@ -545,7 +562,7 @@ namespace memory_tree_rew_ns
     //uint32_t& cn, example& ec, float& sample_p, 
     float train_node(memory_tree& b, base_learner& base, example& ec, const uint32_t cn)
     {
-        float sample_repeat = log(b.max_nodes/2.*b.max_leaf_examples)/log(2.)*1.;
+        float sample_repeat = 1; //log(b.max_nodes/2.*b.max_leaf_examples)/log(2.)*10.;
         float beta = 0.99;
         if (b.nodes[cn].internal == -1){ //leaf: do nothing. 
             cout<<"Error: Train_node is called at a leaf.."<<endl;
@@ -560,8 +577,16 @@ namespace memory_tree_rew_ns
             int loc_at_left_leaf = random_routing_to_leaf(b, base, cn_left, ec, left_sample_p);
             float right_sample_p = 1.0; //int loc_at_right_leaf = random_sample_example_pop(b, cn_right, false);
             int loc_at_right_leaf= random_routing_to_leaf(b, base, cn_right,ec, right_sample_p);
-            rew_left += (loc_at_left_leaf == -1 ? 0.:get_reward(b, ec, *b.examples[b.nodes[cn_left].examples_index[loc_at_left_leaf]]))/left_sample_p/b.nodes[cn].nl;
-            rew_right+= (loc_at_right_leaf== -1 ? 0.:get_reward(b, ec, *b.examples[b.nodes[cn_right].examples_index[loc_at_right_leaf]]))/right_sample_p/b.nodes[cn].nr;
+            
+            if (b.random_route == true){
+                //rew_left += (loc_at_left_leaf == -1 ? 0.:get_reward(b, ec, *b.examples[b.nodes[cn_left].examples_index[loc_at_left_leaf]]))/left_sample_p/b.nodes[cn].nl;
+                rew_left += (loc_at_left_leaf == -1 ? 0.:get_reward(b, ec, *b.examples[loc_at_left_leaf]))/left_sample_p/b.nodes[cn].nl;
+                rew_right+= (loc_at_right_leaf== -1 ? 0.:get_reward(b, ec, *b.examples[loc_at_right_leaf]))/right_sample_p/b.nodes[cn].nr;
+            }
+            else{
+                rew_left += (loc_at_left_leaf == -1 ? 0.:get_reward(b, ec, *b.examples[loc_at_left_leaf]));
+                rew_right+= (loc_at_right_leaf== -1 ? 0.:get_reward(b, ec, *b.examples[loc_at_right_leaf]));
+            }
         }
         rew_left /= (sample_repeat*1.0);
         rew_right /= (sample_repeat*1.0);
@@ -697,7 +722,7 @@ namespace memory_tree_rew_ns
 
     void predict(memory_tree& b, base_learner& base, example& ec)
     {
-        remove_repeat_features_in_ec(ec);
+        //remove_repeat_features_in_ec(ec);
         uint32_t cn = routing(b, 0, base, ec);
         int64_t closest_ec = pick_nearest(b,base,cn,ec);
         float rew = (closest_ec == -1 ? 0.f : get_reward(b, ec, *b.examples[closest_ec]));
@@ -710,9 +735,10 @@ namespace memory_tree_rew_ns
         }
         b.total_reward += rew;
 
-        //if (b.iter > 173551*2)
-        if (b.iter > 900 * 2)    
+        //if (b.iter > 173551*1)
+        //if (b.iter > 900 * 2)    
         //if (b.iter > 7000*2)
+        if (b.iter > 82783*2)
             b.total_test_reward += rew;
 
         ec.loss = (1. - rew)*ec.weight; //convert reward to loss.
@@ -721,21 +747,22 @@ namespace memory_tree_rew_ns
 
     void learn(memory_tree& b, base_learner& base, example& ec)
     {
-        //int32_t train_N = 173551*2;
-        int32_t train_N = 900*2;
+        //int32_t train_N = 173551*1;
+        //int32_t train_N = 900*2;
         //int32_t train_N = 7000*2;
+        int32_t train_N = 82783*2;
         b.iter++;
         //if (b.test_mode == false){
         if (b.iter <= train_N){
             predict(b, base, ec); 
-            if (b.iter%2000 == 0)
+            if (b.iter%3000 == 0)
                 //cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
                 cout<<"at iter "<<b.iter<<", average reward: "<<b.total_reward*1./b.iter<<endl;
             
             clock_t begin = clock();
             example* new_ec = &calloc_or_throw<example>();
             copy_example_data(new_ec, &ec);
-            remove_repeat_features_in_ec(*new_ec); ////sort unique.
+            //remove_repeat_features_in_ec(*new_ec); ////sort unique.
             b.examples.push_back(new_ec);   
             b.num_ecs++; 
 
@@ -749,7 +776,7 @@ namespace memory_tree_rew_ns
         }
         //else if (b.test_mode == true){
         else if (b.iter > train_N){
-            if ((b.iter-train_N) % 100 == 0)
+            if ((b.iter-train_N) % 800 == 0)
                 cout<<"at iter "<<b.iter-train_N<<", avg reward: "<<b.total_test_reward*1./(b.iter-train_N)<<endl;
             clock_t begin = clock();
             predict(b, base, ec);
@@ -943,6 +970,7 @@ base_learner* memory_tree_rew_setup(vw& all)
       ("learn_at_leaf", po::value<bool>()->default_value(true), "whether or not learn at leaf (defualt = True)")
       ("task", po::value<uint32_t>()->default_value(1.), "task: 1:multiclass; 2:Robot Configuration; 3: Q & A with bleu as reward")
       ("Alpha", po::value<float>()->default_value(0.5), "Alpha")
+      ("Random_Route", po::value<bool>()->default_value(false), "whether or not randomize the routing")
       ("Lambda", po::value<float>()->default_value(0.1), "Lambda");
      add_options(all);
 
@@ -974,6 +1002,12 @@ base_learner* memory_tree_rew_setup(vw& all)
         tree.lambda = vm["Lambda"].as<float>();
         *all.file_options << " --Lambda " <<tree.lambda;
     }
+
+    if (vm.count("Random_Route"))
+    {
+        tree.random_route = vm["Random_Route"].as<bool>();
+        *all.file_options << " --Random_Route "<<tree.random_route;
+    }
     
     init_tree(tree);
 
@@ -984,6 +1018,7 @@ base_learner* memory_tree_rew_setup(vw& all)
                     <<"alpha = "<<tree.alpha<<" "
                     <<"Lambda = "<<tree.lambda<<" "
                     <<"task id = "<<tree.task_id<<" "
+                    <<"random route = "<<tree.random_route<<" "
                     <<"learn at leaf = "<<tree.learn_at_leaf
                     <<std::endl;
     

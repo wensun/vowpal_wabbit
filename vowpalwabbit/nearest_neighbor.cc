@@ -164,7 +164,7 @@ namespace nearest_neighbor_ns
         double f1_feat_sum_sq = square_norm_feature(f1);
         double f2_feat_sum_sq = square_norm_feature(f2);
         
-        cout<<f1.values.size()<<" "<<f2.values.size()<<endl;
+        //cout<<f1.values.size()<<" "<<f2.values.size()<<endl;
         //compute the innner product between these twos:
         float dotprod = inner_product_two_features(f1, f2, 1., 1.);
         //float dotprod = inner_product_two_features(f1, f2, f1_feat_sum_sq, f2_feat_sum_sq);
@@ -330,6 +330,7 @@ namespace nearest_neighbor_ns
             int64_t max_pos = -1;
             for(size_t i = 0; i < b.examples.size(); i++)
             {
+                //cout<<i<<endl;
                 float score = 0.f;
                 uint32_t loc = i;
 
@@ -378,7 +379,7 @@ namespace nearest_neighbor_ns
         }
         
         int64_t closest_ec = pick_nearest(b, base, ec);
-        cout<<closest_ec<<endl;
+        //cout<<closest_ec<<endl;
         if (closest_ec != -1){
             float reward = get_reward(b, test_ec, *b.examples[closest_ec]);
             ec.pred.multiclass = b.examples[closest_ec]->l.multi.label;
@@ -386,7 +387,9 @@ namespace nearest_neighbor_ns
             test_ec.loss = -reward * test_ec.weight;
             b.total_reward += reward;
 
-            if (b.iter > 7000*2)
+            //if (b.iter > 7000*2)
+            //if (b.iter > 82784*1)
+            if (b.iter > 173551)
                 b.total_test_reward += reward;
         }
         else{
@@ -402,12 +405,14 @@ namespace nearest_neighbor_ns
     //example for each node, including the leaf, and store the example at the leaf.
     void learn(memory_tree& b, base_learner& base, example& ec)
     {   
-        int32_t train_N = 7000*2;
+        //int32_t train_N = 7000*2;
+        //int32_t train_N = 82784*1;
+        int32_t train_N = 173551;
         b.iter++;       
         //if (b.test_mode == false){
         if (b.iter<=train_N){
             //predict(b, base, ec);
-            if (b.iter%100 == 0)
+            if (b.iter%5000 == 0)
                 //cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
                 cout<<"at iter "<<b.iter<<", average reward: "<<b.total_reward*1./b.iter<<endl;
             

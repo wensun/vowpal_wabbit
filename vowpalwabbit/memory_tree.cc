@@ -753,7 +753,8 @@ namespace memory_tree_ns
 
             //if (b.iter > 900*2)
             //if (b.iter > 173551*2)
-            if (b.iter > 7000*2)
+            //if (b.iter > 7000*2)
+            if (b.iter > 82783*2)
                 b.total_test_reward += reward;
         }
         else{
@@ -816,7 +817,8 @@ namespace memory_tree_ns
     {   
         //int32_t train_N = 900*2;
         //int32_t train_N = 173551*2;
-        int32_t train_N = 7000*2;
+        //int32_t train_N = 7000*2;
+        int32_t train_N = 82783*2;
         b.iter++;       
         //if (b.test_mode == false){
         if (b.iter<=train_N){
