@@ -5,7 +5,7 @@ import numpy as np
 
 num_of_classes = 7
 num_examples = 46000
-leaf_example_multiplier = 1
+leaf_example_multiplier = 2
 lr = 0.1
 bits = 28
 passes = 1
