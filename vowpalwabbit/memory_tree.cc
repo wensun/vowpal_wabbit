@@ -460,16 +460,16 @@ namespace memory_tree_ns
         //simple initilization: initilize the root only
         b.routers_used = 0;
 
-        uint32_t max_num_routers = b.max_nodes + 1;
-        if (b.router_error_feature == true)
-            max_num_routers *= 2;
+	//uint32_t max_num_routers = b.max_nodes + 1;
+        //if (b.router_error_feature == true)
+        //    max_num_routers *= 2;
 
         b.nodes.push_back(node());
         b.nodes[0].internal = -1; //mark the root as leaf
         b.nodes[0].base_router = (b.routers_used++);
-
-        if (b.router_error_feature == true)
-            b.nodes[0].base_router_error = (b.routers_used++);
+	b.nodes[0].depth = 0;
+        //if (b.router_error_feature == true)
+        //    b.nodes[0].base_router_error = (b.routers_used++);
 
         cout<<"tree initiazliation is done...."<<endl
             <<"max nodes "<<b.max_nodes<<endl
@@ -543,15 +543,15 @@ namespace memory_tree_ns
         uint64_t mask = all->weights.mask();
         size_t ss = all->weights.stride_shift();
 
-        ec.indices.push_back (node_id_namespace);
+	if (b.nodes[cn].depth == 0)
+        	ec.indices.push_back (node_id_namespace);
         features& fs = ec.feature_space[node_id_namespace];
 
         //node_only option:
         ec.l.simple = {FLT_MAX, 0.f, 0.f};
-        base.predict(ec, b.nodes[cn].base_router_error); //base_router_error to predict
+        base.predict(ec, b.max_nodes + b.nodes[cn].depth + 1); //base_router_error to predict
 	if (ec.pred.scalar > 0.0) //error:
             fs.push_back(1., ((868771 * cn) << ss) & mask); //add predicted router error information to feature
-
 
         ec.l.multi = mc;
         ec.pred.multiclass = save_pred;
@@ -594,7 +594,7 @@ namespace memory_tree_ns
         if (b.router_error_feature == true){
             float router_error = (ec.pred.scalar*route_label) < 0.f ? 1.f : -1.f;   //if router has error, set 1, otherwise set it -1. 
             ec.l.simple = {router_error, 1., 0.f};
-            base.learn(ec, b.nodes[cn].base_router_error); //update the predictor using the router_error.
+            base.learn(ec, b.max_nodes+b.nodes[cn].depth+1); //update the predictor using the router_error.
 	    //add_learned_router_error_feature(b, base, cn, ec);
         }
 
