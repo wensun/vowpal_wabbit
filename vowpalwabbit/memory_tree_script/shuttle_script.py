@@ -9,7 +9,8 @@ leaf_example_multiplier = 1
 lr = 0.1
 bits = 28
 passes = 1
-learn_at_leaf = 1
+learn_at_leaf = 0
+router_error_feature = 0
 random = 0
 loss = "squared"
 
@@ -21,8 +22,8 @@ if os.path.exists(train_data) is not True:
 saved_model = "shuttle_tree.vw"
 
 start = time.time()
-os.system(".././vw --memory_tree {} --learn_at_leaf {} --leaf_example_multiplier {} --loss_function {} --random_weights {} -l {} -b {} -c --passes {} --holdout_off {} -f {}".format(
-                tree_node, learn_at_leaf, leaf_example_multiplier, loss, random, lr, bits, passes, train_data, saved_model))
+os.system(".././vw --memory_tree {} --learn_at_leaf {} --router_error_feature {} --leaf_example_multiplier {} --loss_function {} --random_weights {} -l {} -b {} -c --passes {} --holdout_off {} -f {}".format(
+                tree_node, learn_at_leaf, router_error_feature, leaf_example_multiplier, loss, random, lr, bits, passes, train_data, saved_model))
 train_time = time.time() - start
 
 #test:
