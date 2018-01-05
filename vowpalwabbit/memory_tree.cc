@@ -100,6 +100,23 @@ namespace memory_tree_ns
         dst->in_use = src->in_use;
     }
 
+    void move_features_to_one_namespace(example* dst, example* src, unsigned char namespace_1)
+    {
+    	copy_example_data(dst, src, true);
+	dst->indices.delete_v();
+	dst->indices.push_back(namespace_1);
+	dst->num_features = 0;
+	dst->total_sum_feat_sq = 0.0;
+	for (auto nc : src->indices)
+	{
+	    for (size_t i = 0; i < src->feature_space[nc].indicies.size(); i++){
+	    	dst->feature_space[namespace_1].push_back(src->feature_space[nc].values[i], src->feature_space[nc].indicies[i]);
+		dst->num_features ++;
+		dst->total_sum_feat_sq += pow(src->feature_space[nc].values[i],2);
+	    }
+	}
+    }
+
     inline void free_example(example* ec)
     {
         ec->tag.delete_v();
@@ -173,7 +190,7 @@ namespace memory_tree_ns
         ec.total_sum_feat_sq = 0.0;
         for(namespace_index c1 : ec1.indices){
             for(namespace_index c2 : ec2.indices){
-                if (c1 == c2 && c1 != node_id_namespace) //do not include the predicted router error features.
+                if (c1 == c2) //do not include the predicted router error features.
                     diag_kronecker_prod_fs_test(ec1.feature_space[c1], ec2.feature_space[c2], ec.feature_space[c1], ec.total_sum_feat_sq, ec1.total_sum_feat_sq, ec2.total_sum_feat_sq);
             }
         }
@@ -273,8 +290,6 @@ namespace memory_tree_ns
         int internal;
         //bool internal; //an internal or leaf
         uint32_t depth; //depth.
-        uint32_t base_router; //use to index router.
-        uint32_t base_router_error; //use to index the predictor for router error
         uint32_t left;  //left child.
         uint32_t right; //right child.
 
@@ -289,8 +304,6 @@ namespace memory_tree_ns
             internal = 0; //0:not used, 1:internal, -1:leaf 
             //internal = false;
             depth = 0;
-            base_router = 0;
-            base_router_error = 0;
             left = 0;
             right = 0;
             nl = 0.001; //initilze to 1, as we need to do nl/nr.
@@ -342,9 +355,9 @@ namespace memory_tree_ns
         uint32_t num_test_ecs;
         uint32_t test_mistakes;
         bool learn_at_leaf;
-	bool router_error_feature;
         bool test_mode;
-        
+ 	unsigned char namespace_1;
+ 	unsigned char namespace_2;	
 
         memory_tree()
         {
@@ -458,24 +471,17 @@ namespace memory_tree_ns
     {
         srand48(4000);
         //simple initilization: initilize the root only
+	b.namespace_1 = 'a';
+	b.namespace_2 = 'b';
         b.routers_used = 0;
-
-	//uint32_t max_num_routers = b.max_nodes + 1;
-        //if (b.router_error_feature == true)
-        //    max_num_routers *= 2;
-
         b.nodes.push_back(node());
         b.nodes[0].internal = -1; //mark the root as leaf
-        b.nodes[0].base_router = (b.routers_used++);
 	b.nodes[0].depth = 0;
-        //if (b.router_error_feature == true)
-        //    b.nodes[0].base_router_error = (b.routers_used++);
 
         cout<<"tree initiazliation is done...."<<endl
             <<"max nodes "<<b.max_nodes<<endl
             <<"tree size: "<<b.nodes.size()<<endl
-            <<"learn at leaf: "<<b.learn_at_leaf<<endl
-	    <<"using predicted router error as feature: "<<b.router_error_feature<<endl;
+            <<"learn at leaf: "<<b.learn_at_leaf<<endl;
     }
 
 
@@ -534,7 +540,7 @@ namespace memory_tree_ns
     }
 
     //add path feature:
-    void add_learned_router_error_feature (memory_tree& b, base_learner& base, uint32_t cn, example& ec)
+    void add_node_id_feature (memory_tree& b, base_learner& base, uint32_t cn, example& ec, unsigned char namespace_2)
     {
         MULTICLASS::label_t mc = ec.l.multi;
         uint32_t save_pred = ec.pred.multiclass;
@@ -543,22 +549,19 @@ namespace memory_tree_ns
         uint64_t mask = all->weights.mask();
         size_t ss = all->weights.stride_shift();
 
-	if (b.nodes[cn].depth == 0)
-            ec.indices.push_back (node_id_namespace);
-        features& fs = ec.feature_space[node_id_namespace];
+	if (cn == 0)
+            ec.indices.push_back (namespace_2);
+        features& fs = ec.feature_space[namespace_2];
 
         //node_only option:
-        ec.l.simple = {FLT_MAX, 0.f, 0.f};
-        base.predict(ec, b.max_nodes + b.nodes[cn].depth); //base_router_error to predict
-	if (ec.pred.scalar > 0.0) //error:
-            fs.push_back(1., ((868771 * cn) << ss) & mask); //add predicted router error information to feature
+        fs.push_back(1., ((868771 * cn) << ss) & mask); //add predicted router error information to feature
 
         ec.l.multi = mc;
         ec.pred.multiclass = save_pred;
     }
 
-    void remove_learned_router_error_feature(memory_tree& b, example& ec){
-    	features& fs = ec.feature_space[node_id_namespace];
+    void remove_node_id_feature(memory_tree& b, example& ec, unsigned char namespace_2){
+    	features& fs = ec.feature_space[namespace_2];
 	fs.erase();
 	ec.indices.pop();
     }
@@ -572,34 +575,20 @@ namespace memory_tree_ns
         //note: here we first train the router and then predict.
         MULTICLASS::label_t mc = ec.l.multi;
         uint32_t save_multi_pred = ec.pred.multiclass;
+	add_node_id_feature(b,base,cn,ec, b.namespace_2);
         ec.l.simple = {FLT_MAX,0.f, 0.f};
-        base.predict(ec, b.nodes[cn].base_router);
+        base.predict(ec, b.nodes[cn].depth);
         float prediction = ec.pred.scalar; 
         float imp_weight = 1.f; //no importance weight.
         
         double weighted_value = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr)/log(2.)+b.alpha*prediction;
         float route_label = weighted_value < 0.f ? -1.f : 1.f;
         
-	if (b.router_error_feature == true)
-	    add_learned_router_error_feature(b,base,cn,ec);
-
         ec.l.simple = {route_label, imp_weight, 0.f};
-	base.learn(ec, b.nodes[cn].base_router); //update the router according to the new example.
+	base.learn(ec, b.nodes[cn].depth); //update the router according to the new example. depth-wise router
 	ec.l.simple = {FLT_MAX,0.f, 0.f};
-        base.predict(ec, b.nodes[cn].base_router);
-        float save_binary_scalar = ec.pred.scalar;
-
-        //train the predictor to predict the router error and add the prediction to features.
-        //the goal is to learn a predictor that can predicts the routing error.
-        if (b.router_error_feature == true){
-            //float router_error = (ec.pred.scalar*route_label) < 0.f ? 1.f : -1.f;   //if router has error, set 1, otherwise set it -1. 
-            //ec.l.simple = {router_error, 1., 0.f};
-            //base.learn(ec, b.max_nodes+b.nodes[cn].depth+1); //update the predictor using the router_error.
-	    
-	    //test the idea of using a depth-wise router and adding it's output as the feature
-	    ec.l.simple = {route_label, imp_weight, 0.f};
-	    base.learn(ec, b.max_nodes+b.nodes[cn].depth);
-        }
+        base.predict(ec, b.nodes[cn].depth);
+        float save_binary_scalar = ec.pred.scalar; //depth wise router. 
 
         ec.l.multi = mc;
         ec.pred.multiclass = save_multi_pred;
@@ -616,16 +605,10 @@ namespace memory_tree_ns
         uint32_t left_child = (uint32_t)b.nodes.size();
         b.nodes.push_back(node());
         b.nodes[left_child].internal = -1;  //left leaf
-        b.nodes[left_child].base_router = (b.routers_used++);
-        if (b.router_error_feature == true)
-            b.nodes[left_child].base_router_error = (b.routers_used++);
 
         uint32_t right_child = (uint32_t)b.nodes.size();
         b.nodes.push_back(node());  
         b.nodes[right_child].internal = -1;  //right leaf
-        b.nodes[right_child].base_router = (b.routers_used++); 
-        if (b.router_error_feature == true)
-            b.nodes[right_child].base_router_error = (b.routers_used++);
 
         if (b.nodes[cn].depth + 1 > b.max_depth){
             b.max_depth = b.nodes[cn].depth + 1;
@@ -649,7 +632,7 @@ namespace memory_tree_ns
             MULTICLASS::label_t mc = b.examples[ec_pos]->l.multi;
             uint32_t save_multi_pred = b.examples[ec_pos]->pred.multiclass;
             b.examples[ec_pos]->l.simple = {1.f, 1.f, 0.f};
-            base.predict(*b.examples[ec_pos], b.nodes[cn].base_router); //re-predict
+            base.predict(*b.examples[ec_pos], b.nodes[cn].depth); //re-predict
             float scalar = b.examples[ec_pos]->pred.scalar;
             if (scalar < 0)
             {
@@ -740,7 +723,7 @@ namespace memory_tree_ns
     {
         example& ec = calloc_or_throw<example>();
         //ec = *b.examples[b.iter];
-        copy_example_data(&ec, &test_ec);
+	move_features_to_one_namespace(&ec, &test_ec, b.namespace_1);
         remove_repeat_features_in_ec(ec);
         
         MULTICLASS::label_t mc = ec.l.multi;
@@ -749,10 +732,8 @@ namespace memory_tree_ns
         ec.l.simple = {-1.f, 1.f, 0.};
         while(b.nodes[cn].internal == 1) //if it's internal
         {
-            if (b.router_error_feature == true) //add predicted routing error into feature
-                add_learned_router_error_feature(b, base, cn, ec);
-
-            base.predict(ec, b.nodes[cn].base_router);
+	    add_node_id_feature(b,base,cn,ec, b.namespace_2);
+            base.predict(ec, b.nodes[cn].depth);
             uint32_t newcn = ec.pred.scalar < 0 ? b.nodes[cn].left : b.nodes[cn].right; //do not need to increment nl and nr.
             cn = newcn;
         }
@@ -795,11 +776,6 @@ namespace memory_tree_ns
         if((b.nodes[cn].internal == -1) && (fake_insert == false)) //get to leaf:
         {   
             b.nodes[cn].examples_index.push_back(ec_array_index);
-            if (b.nodes[cn].examples_index.size() > b.max_ex_in_leaf)
-            {
-                b.max_ex_in_leaf = b.nodes[cn].examples_index.size();
-                //cout<<cn<<" "<<b.max_ex_in_leaf<<endl;
-            }
             float leaf_pred = train_node(b, base, *b.examples[ec_array_index], cn); //tain the leaf as well.
             descent(b.nodes[cn], leaf_pred); //this is a faked descent, the purpose is only to update nl and nr of cn
 
@@ -818,8 +794,7 @@ namespace memory_tree_ns
             uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf]; //ec_id is the postion of the sampled example in b.examples. 
             //re-insert:note that we do not have to 
             //restore the example into b.examples, as it's alreay there
-	    if (b.router_error_feature == true)
-	    	remove_learned_router_error_feature(b, *b.examples[ec_id]); //remove previously added features
+	    remove_node_id_feature(b, *b.examples[ec_id], b.namespace_2); //remove previously added features
             insert_example(b, base, ec_id); //re-insert (no)
         }
 
@@ -837,20 +812,12 @@ namespace memory_tree_ns
 
             clock_t begin = clock();
             example* new_ec = &calloc_or_throw<example>();
-            copy_example_data(new_ec, &ec);
+	    move_features_to_one_namespace(new_ec, &ec, b.namespace_1);
             remove_repeat_features_in_ec(*new_ec); ////sort unique.
             b.examples.push_back(new_ec);   
             b.num_ecs++; 
 
-            float random_prob = merand48(b.all->random_state);
-            if (random_prob < 1.)
-                insert_example(b, base, b.examples.size()-1);
-            else{
-                insert_example(b, base, b.examples.size()-1, true);
-                b.num_ecs--;
-                free_example(new_ec);
-                b.examples.pop();
-            }
+            insert_example(b, base, b.examples.size()-1);
             //if (b.iter % 1 == 0)
             for (int i = 0; i < 1; i++)
                 experience_replay(b, base);
@@ -864,9 +831,7 @@ namespace memory_tree_ns
             predict(b, base, ec);
             b.test_time += double(clock() - begin)/CLOCKS_PER_SEC;
         }
-
     } 
-
 
     void finish(memory_tree& b)
     {
@@ -966,7 +931,6 @@ namespace memory_tree_ns
         writeit(cn.parent, "parent");
         writeit(cn.internal, "internal");
         writeit(cn.depth, "depth");
-        writeit(cn.base_router, "base_router");
         writeit(cn.left, "left");
         writeit(cn.right, "right");
         writeit(cn.nl, "nl");
@@ -1002,7 +966,8 @@ namespace memory_tree_ns
             
             writeit(b.max_nodes, "max_nodes");
             writeit(b.learn_at_leaf, "learn_at_leaf");
-            writeit(b.router_error_feature, "router_error_feature");
+	    writeit(b.namespace_1, "namespace_1");
+	    writeit(b.namespace_2, "namespace_2");
 	    writeitvar(b.nodes.size(), "nodes", n_nodes); 
 
 
@@ -1043,7 +1008,6 @@ base_learner* memory_tree_setup(vw& all)
     new_options(all, "memory tree options")
       ("leaf_example_multiplier", po::value<uint32_t>()->default_value(1.0), "multiplier on examples per leaf (default = log nodes)")
       ("learn_at_leaf", po::value<bool>()->default_value(true), "whether or not learn at leaf (defualt = True)")
-      ("router_error_feature", po::value<bool>()->default_value(false), "whether or not using prediction of routing error as features (defualt = False)")
       ("Alpha", po::value<float>()->default_value(0.1), "Alpha");
      add_options(all);
 
@@ -1052,7 +1016,6 @@ base_learner* memory_tree_setup(vw& all)
     tree.all = &all;
     tree.max_nodes = vm["memory_tree"].as<uint32_t>();
     tree.learn_at_leaf = vm["learn_at_leaf"].as<bool>();
-    tree.router_error_feature = vm["router_error_feature"].as<bool>();
 
     if (vm.count("leaf_example_multiplier"))
       {

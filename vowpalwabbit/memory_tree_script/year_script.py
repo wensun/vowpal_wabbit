@@ -22,8 +22,8 @@ if os.path.exists(train_data) is not True:
 saved_model = "{}_tree.vw".format(train_data)
 
 start = time.time()
-os.system(".././vw --memory_tree {} --learn_at_leaf {} --router_error_feature {} --leaf_example_multiplier {} --loss_function {} --random_weights {} -l {} -b {} -c --passes {} --holdout_off {} -f {}".format(
-                tree_node, learn_at_leaf, router_error_feature, leaf_example_multiplier, loss, random, lr, bits, passes, train_data, saved_model))
+os.system(".././vw --memory_tree {} --learn_at_leaf {} --leaf_example_multiplier {} --loss_function {} --random_weights {} -l {} -b {} -q {} -c --passes {} --holdout_off {} -f {}".format(
+                tree_node, learn_at_leaf, leaf_example_multiplier, loss, random, lr, bits, 'ab', passes, train_data, saved_model))
 train_time = time.time() - start
 
 #test:
