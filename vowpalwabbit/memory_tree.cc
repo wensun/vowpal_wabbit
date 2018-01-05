@@ -544,12 +544,12 @@ namespace memory_tree_ns
         size_t ss = all->weights.stride_shift();
 
 	if (b.nodes[cn].depth == 0)
-        	ec.indices.push_back (node_id_namespace);
+            ec.indices.push_back (node_id_namespace);
         features& fs = ec.feature_space[node_id_namespace];
 
         //node_only option:
         ec.l.simple = {FLT_MAX, 0.f, 0.f};
-        base.predict(ec, b.max_nodes + b.nodes[cn].depth + 1); //base_router_error to predict
+        base.predict(ec, b.max_nodes + b.nodes[cn].depth); //base_router_error to predict
 	if (ec.pred.scalar > 0.0) //error:
             fs.push_back(1., ((868771 * cn) << ss) & mask); //add predicted router error information to feature
 
@@ -592,10 +592,13 @@ namespace memory_tree_ns
         //train the predictor to predict the router error and add the prediction to features.
         //the goal is to learn a predictor that can predicts the routing error.
         if (b.router_error_feature == true){
-            float router_error = (ec.pred.scalar*route_label) < 0.f ? 1.f : -1.f;   //if router has error, set 1, otherwise set it -1. 
-            ec.l.simple = {router_error, 1., 0.f};
-            base.learn(ec, b.max_nodes+b.nodes[cn].depth+1); //update the predictor using the router_error.
-	    //add_learned_router_error_feature(b, base, cn, ec);
+            //float router_error = (ec.pred.scalar*route_label) < 0.f ? 1.f : -1.f;   //if router has error, set 1, otherwise set it -1. 
+            //ec.l.simple = {router_error, 1., 0.f};
+            //base.learn(ec, b.max_nodes+b.nodes[cn].depth+1); //update the predictor using the router_error.
+	    
+	    //test the idea of using a depth-wise router and adding it's output as the feature
+	    ec.l.simple = {route_label, imp_weight, 0.f};
+	    base.learn(ec, b.max_nodes+b.nodes[cn].depth);
         }
 
         ec.l.multi = mc;

@@ -14,7 +14,7 @@ for key in available_shots.iterkeys():
     passes = 3
     learn_at_leaf = 0 # 0
     loss = "squared"#"logistic"
-    router_error_feature = 0
+    router_error_feature = 1
 
     tree_node = int(passes*(num_of_classes*shots/(np.log(num_of_classes*shots)/np.log(2)*leaf_example_multiplier)));
     train_data = "imagenet_{}_shots_training.txt".format(shots)

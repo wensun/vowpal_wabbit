@@ -10,7 +10,7 @@ lr = 1
 bits = 29
 passes = 1
 learn_at_leaf = 0
-router_error_feature = 1
+router_error_feature = 0
 random = 0
 loss = "squared"
 
