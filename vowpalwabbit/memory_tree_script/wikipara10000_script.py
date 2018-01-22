@@ -5,6 +5,7 @@ from IPython import embed
 
 
 available_shots = {'three':3, "one":1}
+available_shots = {'ten':10}
 
 for shot in available_shots.iterkeys():
     print "## perform experiments on {}-shot wikipara-10K ##".format(shot)
@@ -14,7 +15,7 @@ for shot in available_shots.iterkeys():
     lr = 0.1
     bits = 30
     passes = 3
-    learn_at_leaf = 0
+    learn_at_leaf = 1
     #task = 1
     loss = "squared"
 

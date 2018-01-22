@@ -580,8 +580,9 @@ namespace memory_tree_ns
 
         if (b.nodes[cn].examples_index.size() >= 1){
             int loc_at_leaf = int(merand48(b.all->random_state)*b.nodes[cn].examples_index.size());
+	    uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf];
             pop_at_index(b.nodes[cn].examples_index, loc_at_leaf); 
-            return loc_at_leaf;
+            return ec_id;
         }
         else    
             return -1;
@@ -599,13 +600,14 @@ namespace memory_tree_ns
         ec.l.simple = {1.f, 1.f, 0.};
         base.predict(ec, b.nodes[cn].base_router);
         float prediction = ec.pred.scalar; 
-        float imp_weight = 1.f; //no importance weight.
+	//float imp_weight = 1.f; //no importance weight.
         
-        double weighted_value = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr)/log(2.)+b.alpha*prediction;
+        float weighted_value = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr)/log(2.)+b.alpha*prediction;
         float route_label = weighted_value < 0.f ? -1.f : 1.f;
         
 
-        ec.l.simple = {route_label, imp_weight, 0.f};
+        //ec.l.simple = {route_label, imp_weight, 0.f}; 
+	ec.l.simple = {route_label, abs(weighted_value), 0.f};
         base.learn(ec, b.nodes[cn].base_router); //update the router according to the new example.
         
         base.predict(ec, b.nodes[cn].base_router);
@@ -911,9 +913,11 @@ namespace memory_tree_ns
     void experience_replay(memory_tree& b, base_learner& base)
     {
         uint32_t cn = 0; //start from root, randomly descent down! 
-        int loc_at_leaf = random_sample_example_pop(b, cn);
-        if (loc_at_leaf >= 0){
-            uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf]; //ec_id is the postion of the sampled example in b.examples. 
+        //int loc_at_leaf = random_sample_example_pop(b, cn);
+	uint32_t ec_id = random_sample_example_pop(b,cn);
+        //if (loc_at_leaf >= 0){
+	if (ec_id >= 0){
+            //uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf]; //ec_id is the postion of the sampled example in b.examples. 
             //re-insert:note that we do not have to 
             //restore the example into b.examples, as it's alreay there
             insert_example(b, base, ec_id); 

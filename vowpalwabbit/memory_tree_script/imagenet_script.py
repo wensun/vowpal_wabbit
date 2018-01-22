@@ -3,20 +3,21 @@ import time
 import numpy as np
 
 available_shots = {"five":5, "three":3}
+available_shots = {"three":3}
 
 for key in available_shots.iterkeys():
     shots = available_shots[key]
     num_of_classes = 20000
-    leaf_example_multiplier = 10#2#10
+    leaf_example_multiplier = 2#2#10
     lr = 0.1
     bits = 30
     passes = 3
-    learn_at_leaf = 0 # 0
+    learn_at_leaf = 1 # 0
     loss = "squared"#"logistic"
 
     tree_node = int(passes*(num_of_classes*shots/(np.log(num_of_classes*shots)/np.log(2)*leaf_example_multiplier)));
     train_data = "imagenet_{}_shots_training.txt".format(shots)
-    test_data = "imagenet_few_shots_testing.txt"
+    test_data = "imagenet_{}_shots_testing.txt".format(shots)
 
     if os.path.exists(train_data) is not True:
         os.system("wget http://kalman.ml.cmu.edu/wen_datasets/{}".format(train_data))
