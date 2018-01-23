@@ -213,8 +213,8 @@ namespace memory_tree_ns
     {
         features& f1 = ec1.feature_space[ns];
         features& f2 = ec2.feature_space[ns];
-        double f1_feat_sum_sq = square_norm_feature(f1);
-        double f2_feat_sum_sq = square_norm_feature(f2);
+        //double f1_feat_sum_sq = square_norm_feature(f1);
+        //double f2_feat_sum_sq = square_norm_feature(f2);
         //compute the innner product between these twos:
         float dotprod = inner_product_two_features(f1, f2, 1., 1.);
         //float dotprod = inner_product_two_features(f1, f2, f1_feat_sum_sq, f2_feat_sum_sq);
@@ -356,11 +356,12 @@ namespace memory_tree_ns
         
         size_t max_leaf_examples; 
         uint32_t task_id;
+        size_t train_N;
         size_t max_nodes;
         size_t max_routers;
         float alpha; //for cpt type of update.
         size_t routers_used;
-        int iter;
+        size_t iter;
 
         size_t max_depth;
         size_t max_ex_in_leaf;
@@ -446,6 +447,7 @@ namespace memory_tree_ns
             <<"tree size: "<<b.nodes.size()<<endl
             <<"learn at leaf: "<<b.learn_at_leaf<<endl
             <<"Taks id: "<<b.task_id<<endl
+            <<"train_N: "<<b.train_N<<endl
             <<"b.Q: "<<b.Q<<endl
             <<"b.A: "<<b.A<<endl;
     }
@@ -498,8 +500,9 @@ namespace memory_tree_ns
 
         if (b.nodes[cn].examples_index.size() >= 1){
             int loc_at_leaf = int(merand48(b.all->random_state)*b.nodes[cn].examples_index.size());
+            uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf];
             pop_at_index(b.nodes[cn].examples_index, loc_at_leaf); 
-            return loc_at_leaf;
+            return ec_id;
         }
         else    
             return -1;
@@ -530,9 +533,10 @@ namespace memory_tree_ns
         float prediction = ec.pred.scalar; 
         float imp_weight = 1.f; //no importance weight.
         
-        double weighted_value = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr)/log(2.)+b.alpha*prediction;
+        float weighted_value = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr)/log(2.)+b.alpha*prediction;
         float route_label = weighted_value < 0.f ? -1.f : 1.f;
         
+        imp_weight = abs(weighted_value);
         ec.l.simple = {route_label, imp_weight, 0.f};
         base.learn(ec, b.nodes[cn].base_router); //update the router according to the new example.
         
@@ -652,10 +656,11 @@ namespace memory_tree_ns
                 if (b.learn_at_leaf == true){
                     //cout<<"learn at leaf"<<endl;
                     float tmp_s = normalized_linear_prod(b, &ec, b.examples[loc]);
-                    //tmp_s = 0;
+                    tmp_s = 0;
                     example* kprod_ec = &calloc_or_throw<example>();
-                    diag_kronecker_product(ec, *b.examples[loc], *kprod_ec, b.task_id);
-                    kprod_ec->l.simple = {FLT_MAX, 1., 0.*(-tmp_s+0.5)};
+                    diag_kronecker_product_test(ec, *b.examples[loc], *kprod_ec, b.task_id);
+                    //kprod_ec->l.simple = {FLT_MAX, 1., 0.*(-tmp_s+0.5)};
+                    kprod_ec->l.simple = {FLT_MAX, 1., tmp_s};
                     base.predict(*kprod_ec, b.max_routers);
                     //score = kprod_ec->pred.scalar;
                     score = kprod_ec->partial_prediction;
@@ -700,13 +705,15 @@ namespace memory_tree_ns
         {
             example* ec_loc = b.examples[loc];
             float score = normalized_linear_prod(b, &ec, ec_loc);
-            float reward = get_reward(b, ec, *ec_loc);
+            score = 0.;
+            float reward = get_reward(b, ec, *ec_loc);   //reward from 0-1
             example* kprod_ec = &calloc_or_throw<example>();
-            diag_kronecker_product(ec, *ec_loc, *kprod_ec, b.task_id);
+            diag_kronecker_product_test(ec, *ec_loc, *kprod_ec, b.task_id);
      
             float label = ((reward - 0.5) > 0 ? 1:-1);
-            kprod_ec->l.simple = {label, 1., 0.*(score-0.5)}; //do regression on reward. 
-
+            kprod_ec->l.simple = {label, abs(reward-0.5), -score};
+            //kprod_ec->l.simple = {label, 1., 0.*(score-0.5)}; //do regression on reward. 
+            //kprod_ec->l.simple = {label, 1., -score};
             //if (ec.l.multi.label == b.examples[loc]->l.multi.label) //reward = 1:    
             //    kprod_ec->l.simple = {1., 1., -score};
             //else
@@ -754,7 +761,7 @@ namespace memory_tree_ns
             //if (b.iter > 900*2)
             //if (b.iter > 173551*2)
             //if (b.iter > 7000*2)
-            if (b.iter > 82783*2)
+            if (b.iter > b.train_N)
                 b.total_test_reward += reward;
         }
         else{
@@ -801,9 +808,11 @@ namespace memory_tree_ns
     void experience_replay(memory_tree& b, base_learner& base)
     {
         uint32_t cn = 0; //start from root, randomly descent down! 
-        int loc_at_leaf = random_sample_example_pop(b, cn);
-        if (loc_at_leaf >= 0){
-            uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf]; //ec_id is the postion of the sampled example in b.examples. 
+        //int loc_at_leaf = random_sample_example_pop(b, cn);
+        uint32_t ec_id = random_sample_example_pop(b,cn);
+        //if (loc_at_leaf >= 0){
+        if (ec_id >= 0){
+            //uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf]; //ec_id is the postion of the sampled example in b.examples. 
             //re-insert:note that we do not have to 
             //restore the example into b.examples, as it's alreay there
             insert_example(b, base, ec_id); 
@@ -818,10 +827,9 @@ namespace memory_tree_ns
         //int32_t train_N = 900*2;
         //int32_t train_N = 173551*2;
         //int32_t train_N = 7000*2;
-        int32_t train_N = 82783*2;
         b.iter++;       
         //if (b.test_mode == false){
-        if (b.iter<=train_N){
+        if (b.iter<=b.train_N){
             predict(b, base, ec);
             if (b.iter%5000 == 0)
                 //cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
@@ -852,9 +860,9 @@ namespace memory_tree_ns
             b.construct_time += elapsed_secs;
         }
         //else if (b.test_mode == true){
-        else if (b.iter > train_N){
-            if ((b.iter-train_N) % 1000 == 0)
-                cout<<"at iter "<<b.iter-train_N<<",total_reward "<<b.total_test_reward<<", avg_reward: "<<b.total_test_reward*1./(b.iter-train_N)<<endl;
+        else if (b.iter > b.train_N){
+            if ((b.iter-b.train_N) % 1000 == 0)
+                cout<<"at iter "<<b.iter-b.train_N<<",total_reward "<<b.total_test_reward<<", avg_reward: "<<b.total_test_reward*1./(b.iter-b.train_N)<<endl;
             clock_t begin = clock();
             predict(b, base, ec);
             clock_t end = clock();
@@ -874,7 +882,7 @@ namespace memory_tree_ns
             free_example(b.examples[i]);
         b.examples.delete_v();
         cout<<b.max_nodes<<endl;
-        cout<<b.total_test_reward<<endl;
+        cout<<"average test reward: "<<b.total_test_reward/(b.iter - b.train_N)<<", in total of "<<b.iter-b.train_N<<" test examples."<<endl;
         cout<<"construct time: "<<b.construct_time<<endl;
         cout<<"test time: "<<b.test_time<<endl;
     }
@@ -1044,6 +1052,7 @@ base_learner* memory_tree_setup(vw& all)
       ("leaf_example_multiplier", po::value<uint32_t>()->default_value(1.0), "multiplier on examples per leaf (default = log nodes)")
       ("learn_at_leaf", po::value<bool>()->default_value(true), "whether or not learn at leaf (defualt = True)")
       ("task", po::value<uint32_t>()->default_value(1.), "task: 1:multiclass; 2: Robot Configuration; 3:Q&A with bleu as reward")
+      ("train_N", po::value<size_t>()->default_value(1000), "num of training examples")
       ("Alpha", po::value<float>()->default_value(0.1), "Alpha");
      add_options(all);
 
@@ -1063,6 +1072,11 @@ base_learner* memory_tree_setup(vw& all)
     {
         tree.task_id = vm["task"].as<uint32_t>();
         *all.file_options << " --task "<< vm["task"].as<uint32_t>();
+    }
+    if (vm.count("train_N"))
+    {
+        tree.train_N = vm["train_N"].as<size_t>();
+        *all.file_options << " --train_N "<< vm["train_N"].as<size_t>();
     }
 
     if (vm.count("Alpha"))
