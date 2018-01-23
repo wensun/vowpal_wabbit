@@ -656,7 +656,7 @@ namespace memory_tree_ns
                 if (b.learn_at_leaf == true){
                     //cout<<"learn at leaf"<<endl;
                     float tmp_s = normalized_linear_prod(b, &ec, b.examples[loc]);
-                    tmp_s = 0;
+                    //tmp_s = 0;
                     example* kprod_ec = &calloc_or_throw<example>();
                     diag_kronecker_product_test(ec, *b.examples[loc], *kprod_ec, b.task_id);
                     //kprod_ec->l.simple = {FLT_MAX, 1., 0.*(-tmp_s+0.5)};
@@ -705,13 +705,14 @@ namespace memory_tree_ns
         {
             example* ec_loc = b.examples[loc];
             float score = normalized_linear_prod(b, &ec, ec_loc);
-            score = 0.;
+            //score = 0.;
             float reward = get_reward(b, ec, *ec_loc);   //reward from 0-1
             example* kprod_ec = &calloc_or_throw<example>();
             diag_kronecker_product_test(ec, *ec_loc, *kprod_ec, b.task_id);
      
             float label = ((reward - 0.5) > 0 ? 1:-1);
             kprod_ec->l.simple = {label, abs(reward-0.5), -score};
+	    //kprod_ec->l.simple = {reward-0.5, 1., -score};
             //kprod_ec->l.simple = {label, 1., 0.*(score-0.5)}; //do regression on reward. 
             //kprod_ec->l.simple = {label, 1., -score};
             //if (ec.l.multi.label == b.examples[loc]->l.multi.label) //reward = 1:    
