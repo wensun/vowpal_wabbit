@@ -45,26 +45,35 @@ for shot in available_shots.iterkeys():
 
 
     print "#################### Recall Tree ################"
+    start = time.time()
     os.system(command_recall_tree)
+    rt_contruct_time = time.time() - start
+
     start = time.time()
     os.system(".././vw {} -t -i {}".format(test_data, saved_model_rt))
     rt_test_time = time.time() - start
-    print "Recall Tree inference time is {}".format(rt_test_time/10000)
+    print "Recall Tree construct time {}, and inference time is {}".format(rt_contruct_time,rt_test_time/10000)
 
 
     print "################ Log Multi ##################"
+    start = time.time()
     os.system(command_log_multi)
+    lm_construct_time = time.time() - start
+
     start = time.time()
     os.system(".././vw {} -t -i {}".format(test_data, saved_model_lm))
     lm_test_time = time.time() - start
-    print "log multi inference time is {}".format(lm_test_time / 10000)
+    print "log multi construct time {}, inference time is {}".format(lm_construct_time,lm_test_time / 10000)
 
     print "############### OAA #######################"
+    start = time.time()
     os.system(command_oaa)
+    oaa_construct_time = time.time() - start
+
     start = time.time()
     os.system(".././vw {} -t -i {}".format(test_data, saved_model_oaa))
     oaa_test_time = time.time() - start
-    print "oaa inference time is {}".format(oaa_test_time / 10000)
+    print "oaa construct time {}, and inference time is {}".format(oaa_construct_time, oaa_test_time / 10000)
     
 
 
