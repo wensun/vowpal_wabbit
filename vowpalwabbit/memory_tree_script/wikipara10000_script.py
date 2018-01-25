@@ -5,7 +5,7 @@ from IPython import embed
 
 
 available_shots = {'three':3, "one":1}
-available_shots = {'ten':10}
+available_shots = {'three':3}
 
 for shot in available_shots.iterkeys():
     print "## perform experiments on {}-shot wikipara-10K ##".format(shot)

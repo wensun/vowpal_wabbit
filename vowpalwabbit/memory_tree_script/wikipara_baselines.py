@@ -3,7 +3,7 @@ import time
 import numpy as np
 
 
-available_shots = {"two":2}
+available_shots = {"three":3}
 
 for shot in available_shots.iterkeys():
     print "{}-shot wikipara-10k ".format(shot)
@@ -68,7 +68,7 @@ for shot in available_shots.iterkeys():
     print "############### OAA #######################"
     start = time.time()
     os.system(command_oaa)
-    oaa_construct_time = time.time() - oaa
+    oaa_construct_time = time.time() - start
 
     start = time.time()
     os.system(".././vw {} -t -i {}".format(test_data, saved_model_oaa))
