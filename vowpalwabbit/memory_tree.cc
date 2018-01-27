@@ -432,8 +432,11 @@ namespace memory_tree_ns
 
         float construct_time;
         float test_time;
+        float cumulative_reward;
+        float cumulative_reward_count;
 
         bool path_id_feat;
+        bool hal_version;
 
         uint32_t num_mistakes;
         uint32_t num_ecs;
@@ -636,7 +639,7 @@ namespace memory_tree_ns
 
         if (b.nodes[cn].depth + 1 > b.max_depth){
             b.max_depth = b.nodes[cn].depth + 1;
-            cout<<"depth "<<b.max_depth<<endl;
+            //cout<<"depth "<<b.max_depth<<endl;
         }
 
         b.nodes[cn].left = left_child;
@@ -680,7 +683,7 @@ namespace memory_tree_ns
         if (std::max(b.nodes[cn].nl, b.nodes[cn].nr) > b.max_ex_in_leaf)
         {
             b.max_ex_in_leaf = std::max(b.nodes[cn].nl, b.nodes[cn].nr);
-            cout<<b.max_ex_in_leaf<<endl;
+            //cout<<b.max_ex_in_leaf<<endl;
         }
 
     }
@@ -869,6 +872,66 @@ namespace memory_tree_ns
         free_example(&ec);
     }
 
+  float insert_example_hal_helper(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, uint32_t cn, bool deviated) {
+    //cerr << "insert_example_hal_helper(" << cn << ")" << endl;
+    example& ec = *b.examples[ec_array_index];
+    // base case: leaf
+    if (b.nodes[cn].internal == -1) { // got to a leaf
+      b.nodes[cn].examples_index.push_back(ec_array_index); // do the insert
+      
+      // first, get the reward
+      float final_reward = 0.;
+      int64_t closest_ec = pick_nearest(b, base, cn, ec);
+      if ((closest_ec != -1) && (b.examples[closest_ec]->l.multi.label == ec.l.multi.label))
+	final_reward = ec.weight;
+      
+      if (b.learn_at_leaf == true)
+	learn_similarity_at_leaf(b, base, cn, ec);
+      // TODO we're not training the node here, is this correct?
+      base.predict(ec, b.nodes[cn].base_router);
+      float prediction = ec.pred.scalar;
+      descent(b.nodes[cn], prediction); // faked descent
+      if((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size()+2 < b.max_nodes))
+	split_leaf(b, base, cn);
+
+      return final_reward;
+    }
+      
+
+    // inductive case: internal node
+    float p_follow = (false && deviated) ? 1. : (1. - 1. / (float)(b.max_depth));
+    // get the current node's prediction
+    base.predict(ec, b.nodes[cn].base_router);
+    float prediction = ec.pred.scalar;
+    bool deviate = merand48(b.all->random_state) > p_follow;
+    if (deviate) prediction = -prediction;
+    uint32_t newcn = descent(b.nodes[cn], prediction);
+    // recurse
+    float final_reward = insert_example_hal_helper(b, base, ec_array_index, newcn, deviated || deviate);
+    // consider using a control variate baseline
+    float baseline = 0.; // (b.cumulative_reward_count < 1) ? 0. : (b.cumulative_reward / b.cumulative_reward_count);
+    float ips_reward = (final_reward - baseline) / (deviate ? (1. - p_follow) : p_follow); // IPS on the reward
+    // if reward is positive, that should push us in the direction of _prediction_
+    if (prediction < 0) ips_reward = -ips_reward;
+    // update this node's router
+    float objective = (1. - b.alpha) * log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha * ips_reward;
+    if (merand48(b.all->random_state) < 1e-4)
+      cerr << "final_reward=" << final_reward << "\tdeviate=" << deviate << "\tp_follow=" << p_follow << "\tips_reward=" << ips_reward << "\tobjective=" << objective << endl;
+    // update
+    MULTICLASS::label_t mc = ec.l.multi; // save label
+    ec.l.simple = { objective < 0. ? -1.f : 1.f, fabs(objective) , 0. };
+    base.learn(ec, b.nodes[cn].base_router);
+    ec.l.multi = mc; // restore label
+
+    return final_reward;
+  }
+
+  void insert_example_hal(memory_tree& b, base_learner& base, const uint32_t& ec_array_index) {
+    float final_reward = insert_example_hal_helper(b, base, ec_array_index, 0, false);
+    b.cumulative_reward += final_reward;
+    b.cumulative_reward_count += 1.;
+  }
+  
     //node here the ec is already stored in the b.examples, the task here is to rout it to the leaf, 
     //and insert the ec_array_index to the leaf.
     void insert_example(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, bool fake_insert = false)
@@ -912,6 +975,7 @@ namespace memory_tree_ns
 
     void experience_replay(memory_tree& b, base_learner& base)
     {
+      return; // TODO turn this back on
         uint32_t cn = 0; //start from root, randomly descent down! 
         //int loc_at_leaf = random_sample_example_pop(b, cn);
 	uint32_t ec_id = random_sample_example_pop(b,cn);
@@ -933,7 +997,7 @@ namespace memory_tree_ns
             b.iter++;
             predict(b, base, ec);
             if (b.iter%5000 == 0)
-                cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
+	      cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<", baseline: " <<(b.cumulative_reward/b.cumulative_reward_count)<<", max_depth: "<<b.max_depth<<endl;
 
             clock_t begin = clock();
             example* new_ec = &calloc_or_throw<example>();
@@ -943,9 +1007,13 @@ namespace memory_tree_ns
             b.num_ecs++; 
 
             float random_prob = merand48(b.all->random_state);
-            if (random_prob < 1.)
-                insert_example(b, base, b.examples.size()-1);
-            else{
+            if (random_prob < 1.) {
+	      if (b.hal_version)
+		insert_example_hal(b, base, b.examples.size()-1);
+	      else
+		insert_example(b, base, b.examples.size()-1);
+	    }else{
+	      if (b.hal_version) cerr << "eeeeeek!" << endl;
                 insert_example(b, base, b.examples.size()-1, true);
                 b.num_ecs--;
                 free_example(new_ec);
@@ -1140,6 +1208,7 @@ base_learner* memory_tree_setup(vw& all)
     
     new_options(all, "memory tree options")
       ("leaf_example_multiplier", po::value<uint32_t>()->default_value(1.0), "multiplier on examples per leaf (default = log nodes)")
+      ("hal_version", "use reward based optimization")
       ("learn_at_leaf", po::value<bool>()->default_value(true), "whether or not learn at leaf (defualt = True)")
       ("Alpha", po::value<float>()->default_value(0.1), "Alpha");
      add_options(all);
@@ -1160,6 +1229,11 @@ base_learner* memory_tree_setup(vw& all)
 	tree.alpha = vm["Alpha"].as<float>();
 	*all.file_options << " --Alpha " << tree.alpha;
       }
+    if (vm.count("hal_version"))
+      {
+	tree.hal_version = vm.count("hal_version") > 0;
+	*all.file_options << " --hal_version";
+      }
     
     init_tree(tree);
 
@@ -1167,7 +1241,8 @@ base_learner* memory_tree_setup(vw& all)
         all.trace_message << "memory_tree:" << " "
                     <<"max_nodes = "<< tree.max_nodes << " " 
                     <<"max_leaf_examples = "<<tree.max_leaf_examples<<" "
-                    <<"alpha = "<<tree.alpha
+ 		    <<"alpha = "<<tree.alpha<<" "
+		    <<"hal_version = " << tree.hal_version<< " "
                     <<std::endl;
     
     learner<memory_tree>& l = 
@@ -1192,3 +1267,54 @@ base_learner* memory_tree_setup(vw& all)
 
 
 //learning rate for aloi: 0.0001
+
+
+/*
+$ zcat aloi_train.vw.gz | sed 's/|/|f/' | ../../vowpalwabbit/vw -k -c --passes 8000 --memory_tree 1000 -b 26 -q'\x88': -l 0.0001 --Alpha 0.5 --early_terminate 9999 --holdout_off
+average  since         example        example  current  current  current
+loss     last          counter         weight    label  predict features
+1.000000 1.000000            1            1.0      796        0       46
+1.000000 1.000000            2            2.0      712      796       23
+1.000000 1.000000            4            4.0      590      676       20
+1.000000 1.000000            8            8.0      835      712       46
+1.000000 1.000000           16           16.0      995      331       40
+1.000000 1.000000           32           32.0      200      387       24
+1.000000 1.000000           64           64.0      697      150       41
+1.000000 1.000000          128          128.0      344      764       16
+0.992188 0.984375          256          256.0       98       14       31
+0.976562 0.960938          512          512.0       13        1       38
+0.972656 0.968750         1024         1024.0      113      415       29
+0.970703 0.968750         2048         2048.0      670      508       22
+0.967529 0.964355         4096         4096.0      340      699       30
+at iter 5000, pred error: 0.9658, baseline=-nan
+0.955322 0.943115         8192         8192.0      426      485       61
+at iter 10000, pred error: 0.9537, baseline=-nan
+at iter 15000, pred error: 0.942467, baseline=-nan
+0.938538 0.921753        16384        16384.0      972      300       44
+at iter 20000, pred error: 0.9323, baseline=-nan
+at iter 25000, pred error: 0.92568, baseline=-nan
+at iter 30000, pred error: 0.918733, baseline=-nan
+0.915924 0.893311        32768        32768.0      431      431       34
+at iter 35000, pred error: 0.913114, baseline=-nan
+at iter 40000, pred error: 0.90895, baseline=-nan
+at iter 45000, pred error: 0.904756, baseline=-nan
+at iter 50000, pred error: 0.90042, baseline=-nan
+at iter 55000, pred error: 0.897218, baseline=-nan
+at iter 60000, pred error: 0.893933, baseline=-nan
+at iter 65000, pred error: 0.890892, baseline=-nan
+0.890259 0.864594        65536        65536.0      645      759       22
+at iter 70000, pred error: 0.8865, baseline=-nan
+at iter 75000, pred error: 0.88352, baseline=-nan
+at iter 80000, pred error: 0.879463, baseline=-nan
+at iter 85000, pred error: 0.876694, baseline=-nan
+at iter 90000, pred error: 0.874333, baseline=-nan
+at iter 95000, pred error: 0.872189, baseline=-nan
+at iter 100000, pred error: 0.87347, baseline=-nan
+at iter 105000, pred error: 0.877048, baseline=-nan
+at iter 110000, pred error: 0.880055, baseline=-nan
+at iter 115000, pred error: 0.882809, baseline=-nan
+at iter 120000, pred error: 0.8844, baseline=-nan
+at iter 125000, pred error: 0.885464, baseline=-nan
+at iter 130000, pred error: 0.8856, baseline=-nan
+0.885818 0.881378       131072       131072.0      253      226       37
+ */
