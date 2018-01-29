@@ -872,34 +872,37 @@ namespace memory_tree_ns
         free_example(&ec);
     }
 
-  float insert_example_hal_helper(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, uint32_t cn, bool deviated) {
+  float insert_example_hal_helper(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, uint32_t cn, bool deviated, bool insert_only) {
     //cerr << "insert_example_hal_helper(" << cn << ")" << endl;
     example& ec = *b.examples[ec_array_index];
     // base case: leaf
     if (b.nodes[cn].internal == -1) { // got to a leaf
-      b.nodes[cn].examples_index.push_back(ec_array_index); // do the insert
-      
-      // first, get the reward
+      if (insert_only) {
+	//cerr << "insert_only=1 cn=" << cn << endl;
+	b.nodes[cn].examples_index.push_back(ec_array_index); // do the insert
+	if (b.learn_at_leaf == true)
+	  learn_similarity_at_leaf(b, base, cn, ec);
+	return 0.;
+      }
+      // get the reward
       float final_reward = 0.;
       int64_t closest_ec = pick_nearest(b, base, cn, ec);
       if ((closest_ec != -1) && (b.examples[closest_ec]->l.multi.label == ec.l.multi.label))
 	final_reward = ec.weight;
       
-      if (b.learn_at_leaf == true)
-	learn_similarity_at_leaf(b, base, cn, ec);
-      // TODO we're not training the node here, is this correct?
       base.predict(ec, b.nodes[cn].base_router);
       float prediction = ec.pred.scalar;
       descent(b.nodes[cn], prediction); // faked descent
       if((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size()+2 < b.max_nodes))
 	split_leaf(b, base, cn);
 
+      //cerr << "insert_only=0 cn=" << cn << " deviated=" << deviated << " final_reward=" << final_reward << " closest_ec=" << closest_ec << endl;
       return final_reward;
     }
-      
 
     // inductive case: internal node
-    float p_follow = (false && deviated) ? 1. : (1. - 1. / (float)(b.max_depth));
+    float p_follow = (deviated) ? 1. : (1. - 1. / (float)(b.max_depth));
+    if (insert_only) p_follow = 1.;
     // get the current node's prediction
     base.predict(ec, b.nodes[cn].base_router);
     float prediction = ec.pred.scalar;
@@ -907,7 +910,7 @@ namespace memory_tree_ns
     if (deviate) prediction = -prediction;
     uint32_t newcn = descent(b.nodes[cn], prediction);
     // recurse
-    float final_reward = insert_example_hal_helper(b, base, ec_array_index, newcn, deviated || deviate);
+    float final_reward = insert_example_hal_helper(b, base, ec_array_index, newcn, deviated || deviate, insert_only);
     // consider using a control variate baseline
     float baseline = 0.; // (b.cumulative_reward_count < 1) ? 0. : (b.cumulative_reward / b.cumulative_reward_count);
     float ips_reward = (final_reward - baseline) / (deviate ? (1. - p_follow) : p_follow); // IPS on the reward
@@ -915,7 +918,7 @@ namespace memory_tree_ns
     if (prediction < 0) ips_reward = -ips_reward;
     // update this node's router
     float objective = (1. - b.alpha) * log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha * ips_reward;
-    if (merand48(b.all->random_state) < 1e-4)
+    if ((!insert_only) && (merand48(b.all->random_state) < 1e-4))
       cerr << "final_reward=" << final_reward << "\tdeviate=" << deviate << "\tp_follow=" << p_follow << "\tips_reward=" << ips_reward << "\tobjective=" << objective << endl;
     // update
     MULTICLASS::label_t mc = ec.l.multi; // save label
@@ -927,7 +930,8 @@ namespace memory_tree_ns
   }
 
   void insert_example_hal(memory_tree& b, base_learner& base, const uint32_t& ec_array_index) {
-    float final_reward = insert_example_hal_helper(b, base, ec_array_index, 0, false);
+    insert_example_hal_helper(b, base, ec_array_index, 0, false, true); // insert only
+    float final_reward = insert_example_hal_helper(b, base, ec_array_index, 0, false, false); // learn
     b.cumulative_reward += final_reward;
     b.cumulative_reward_count += 1.;
   }
