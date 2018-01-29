@@ -5,7 +5,7 @@ from IPython import embed
 
 
 available_shots = {'three':3, "one":1}
-available_shots = {'three':3}
+available_shots = {'two':2}
 
 for shot in available_shots.iterkeys():
     print "## perform experiments on {}-shot wikipara-10K ##".format(shot)
@@ -15,7 +15,8 @@ for shot in available_shots.iterkeys():
     lr = 0.1
     bits = 30
     passes = 3
-    learn_at_leaf = 1
+    hal_version = 1
+    learn_at_leaf = 0
     #task = 1
     loss = "squared"
 
@@ -32,8 +33,8 @@ for shot in available_shots.iterkeys():
 
     print "## Training..."
     start = time.time()
-    os.system(".././vw --memory_tree {} --learn_at_leaf {} --leaf_example_multiplier {} -l {} -b {} -c --passes {} --loss_function {} --holdout_off {} -f {}".format(
-                tree_node, learn_at_leaf, leaf_example_multiplier, lr, bits, passes, loss, train_data, saved_model))
+    os.system(".././vw --memory_tree {} --learn_at_leaf {} --hal_version {} --leaf_example_multiplier {} -l {} -b {} -c --passes {} --loss_function {} --holdout_off {} -f {}".format(
+                tree_node, learn_at_leaf, hal_version, leaf_example_multiplier, lr, bits, passes, loss, train_data, saved_model))
     train_time = time.time() - start
 
     #test:

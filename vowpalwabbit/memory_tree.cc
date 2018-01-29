@@ -685,7 +685,7 @@ namespace memory_tree_ns
             b.max_ex_in_leaf = std::max(b.nodes[cn].nl, b.nodes[cn].nr);
             //cout<<b.max_ex_in_leaf<<endl;
         }
-
+        
     }
     
     //add path feature:
@@ -815,6 +815,75 @@ namespace memory_tree_ns
         }
     }
 
+    void split_leaf_hal(memory_tree& b, base_learner& base, const uint32_t cn)
+    {
+        //create two children
+        b.nodes[cn].internal = 1; //swith to internal node.
+        uint32_t left_child = (uint32_t)b.nodes.size();
+        b.nodes.push_back(node());
+        b.nodes[left_child].internal = -1;  //left leaf
+        b.nodes[left_child].base_router = (b.routers_used++);
+        uint32_t right_child = (uint32_t)b.nodes.size();
+        b.nodes.push_back(node());  
+        b.nodes[right_child].internal = -1;  //right leaf
+        b.nodes[right_child].base_router = (b.routers_used++); 
+
+        if (b.nodes[cn].depth + 1 > b.max_depth){
+            b.max_depth = b.nodes[cn].depth + 1;
+            //cout<<"depth "<<b.max_depth<<endl;
+        }
+
+        b.nodes[cn].left = left_child;
+        b.nodes[cn].right = right_child;
+        b.nodes[left_child].parent = cn;
+        b.nodes[right_child].parent = cn;
+        b.nodes[left_child].depth = b.nodes[cn].depth + 1;
+        b.nodes[right_child].depth = b.nodes[cn].depth + 1;
+
+        for(size_t ec_id = 0; ec_id < b.nodes[cn].examples_index.size(); ec_id++) //scan all examples stored in the cn
+        {
+            float left_reward = 0.;
+            float right_reward = 0.;
+            uint32_t ec_pos = b.nodes[cn].examples_index[ec_id];
+            int64_t left_closest = pick_nearest(b,base,left_child, *b.examples[ec_pos]);
+            int64_t right_closest= pick_nearest(b,base,right_child,*b.examples[ec_pos]);
+            if ((left_closest != -1) && (b.examples[left_closest]->l.multi.label == b.examples[ec_pos]->l.multi.label)) {
+                left_reward = b.examples[ec_pos]->weight;
+            }
+            if ((right_closest != -1) && (b.examples[right_closest]->l.multi.label == b.examples[ec_pos]->l.multi.label)) {
+                right_reward = b.examples[ec_pos]->weight;
+            }
+            float objective = (1-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha*(right_reward - left_reward);
+
+            MULTICLASS::label_t mc = b.examples[ec_pos]->l.multi;
+            uint32_t save_multi_pred = b.examples[ec_pos]->pred.multiclass;
+            b.examples[ec_pos]->l.simple = {objective < 0. ? -1.f:1.f, fabs(objective), 0.};
+            base.learn(*b.examples[ec_pos], b.nodes[cn].base_router);
+            base.predict(*b.examples[ec_pos], b.nodes[cn].base_router);
+            float scalar = b.examples[ec_pos]->pred.scalar;
+            if (scalar < 0){
+                b.nodes[left_child].examples_index.push_back(ec_pos);
+                b.nodes[cn].nl ++;
+            }
+            else{
+                b.nodes[right_child].examples_index.push_back(ec_pos);
+                b.nodes[cn].nr ++;
+            }
+            b.examples[ec_pos]->l.multi = mc;
+            b.examples[ec_pos]->pred.multiclass = save_multi_pred;
+        }
+        b.nodes[cn].examples_index.delete_v(); 
+        b.nodes[cn].nl = std::max(double(b.nodes[left_child].examples_index.size()), 0.001);
+        b.nodes[cn].nr = std::max(double(b.nodes[right_child].examples_index.size()), 0.001); //avoid to set nr to zero
+        
+        if (std::max(b.nodes[cn].nl, b.nodes[cn].nr) > b.max_ex_in_leaf)
+        {
+            b.max_ex_in_leaf = std::max(b.nodes[cn].nl, b.nodes[cn].nr);
+            //cout<<b.max_ex_in_leaf<<endl;
+        }
+    }
+
+
     void predict(memory_tree& b, base_learner& base, example& test_ec)
     {
         example& ec = calloc_or_throw<example>();
@@ -901,7 +970,7 @@ namespace memory_tree_ns
     }
 
     // inductive case: internal node
-    float p_follow = (deviated) ? 1. : (1. - 1. / (float)(b.max_depth));
+    float p_follow = (false && deviated) ? 1. : (1. - 1. / (float)(b.max_depth));
     if (insert_only) p_follow = 1.;
     // get the current node's prediction
     base.predict(ec, b.nodes[cn].base_router);
@@ -917,9 +986,9 @@ namespace memory_tree_ns
     // if reward is positive, that should push us in the direction of _prediction_
     if (prediction < 0) ips_reward = -ips_reward;
     // update this node's router
-    float objective = (1. - b.alpha) * log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha * ips_reward;
-    if ((!insert_only) && (merand48(b.all->random_state) < 1e-4))
-      cerr << "final_reward=" << final_reward << "\tdeviate=" << deviate << "\tp_follow=" << p_follow << "\tips_reward=" << ips_reward << "\tobjective=" << objective << endl;
+    float objective = (1. - b.alpha) * log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha * ips_reward/2.;
+    //if ((!insert_only) && (merand48(b.all->random_state) < 1e-4))
+    //  cerr << "final_reward=" << final_reward << "\tdeviate=" << deviate << "\tp_follow=" << p_follow << "\tips_reward=" << ips_reward << "\tobjective=" << objective << endl;
     // update
     MULTICLASS::label_t mc = ec.l.multi; // save label
     ec.l.simple = { objective < 0. ? -1.f : 1.f, fabs(objective) , 0. };
@@ -979,12 +1048,12 @@ namespace memory_tree_ns
 
     void experience_replay(memory_tree& b, base_learner& base)
     {
-      return; // TODO turn this back on
+      //return; // TODO turn this back on
         uint32_t cn = 0; //start from root, randomly descent down! 
         //int loc_at_leaf = random_sample_example_pop(b, cn);
-	uint32_t ec_id = random_sample_example_pop(b,cn);
+	    int ec_id = random_sample_example_pop(b,cn);
         //if (loc_at_leaf >= 0){
-	if (ec_id >= 0){
+	    if (ec_id >= 0){
             //uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf]; //ec_id is the postion of the sampled example in b.examples. 
             //re-insert:note that we do not have to 
             //restore the example into b.examples, as it's alreay there
@@ -1012,12 +1081,14 @@ namespace memory_tree_ns
 
             float random_prob = merand48(b.all->random_state);
             if (random_prob < 1.) {
-	      if (b.hal_version)
-		insert_example_hal(b, base, b.examples.size()-1);
-	      else
-		insert_example(b, base, b.examples.size()-1);
-	    }else{
-	      if (b.hal_version) cerr << "eeeeeek!" << endl;
+	            if (b.hal_version){
+		            insert_example_hal(b, base, b.examples.size()-1);
+                }
+	        else
+		        insert_example(b, base, b.examples.size()-1);
+	        }
+            else{
+	            if (b.hal_version) cerr << "eeeeeek!" << endl;
                 insert_example(b, base, b.examples.size()-1, true);
                 b.num_ecs--;
                 free_example(new_ec);
@@ -1212,7 +1283,7 @@ base_learner* memory_tree_setup(vw& all)
     
     new_options(all, "memory tree options")
       ("leaf_example_multiplier", po::value<uint32_t>()->default_value(1.0), "multiplier on examples per leaf (default = log nodes)")
-      ("hal_version", "use reward based optimization")
+      ("hal_version", po::value<bool>()->default_value(false), "use reward based optimization")
       ("learn_at_leaf", po::value<bool>()->default_value(true), "whether or not learn at leaf (defualt = True)")
       ("Alpha", po::value<float>()->default_value(0.1), "Alpha");
      add_options(all);
@@ -1235,8 +1306,8 @@ base_learner* memory_tree_setup(vw& all)
       }
     if (vm.count("hal_version"))
       {
-	tree.hal_version = vm.count("hal_version") > 0;
-	*all.file_options << " --hal_version";
+	tree.hal_version =  vm["hal_version"].as<bool>();  //vm.count("hal_version") > 0;
+	*all.file_options << " --hal_version "<<tree.hal_version;
       }
     
     init_tree(tree);
