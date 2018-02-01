@@ -583,7 +583,7 @@ namespace memory_tree_ns
 
         if (b.nodes[cn].examples_index.size() >= 1){
             int loc_at_leaf = int(merand48(b.all->random_state)*b.nodes[cn].examples_index.size());
-	    uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf];
+	        uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf];
             pop_at_index(b.nodes[cn].examples_index, loc_at_leaf); 
             return ec_id;
         }
@@ -941,37 +941,39 @@ namespace memory_tree_ns
         free_example(&ec);
     }
 
+
+
   float insert_example_hal_helper(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, uint32_t cn, bool deviated, bool insert_only) {
     //cerr << "insert_example_hal_helper(" << cn << ")" << endl;
     example& ec = *b.examples[ec_array_index];
     // base case: leaf
     if (b.nodes[cn].internal == -1) { // got to a leaf
-      if (insert_only) {
-	//cerr << "insert_only=1 cn=" << cn << endl;
-	b.nodes[cn].examples_index.push_back(ec_array_index); // do the insert
-	if (b.learn_at_leaf == true)
-	  learn_similarity_at_leaf(b, base, cn, ec);
-	return 0.;
-      }
-      // get the reward
-      float final_reward = 0.;
-      int64_t closest_ec = pick_nearest(b, base, cn, ec);
-      if ((closest_ec != -1) && (b.examples[closest_ec]->l.multi.label == ec.l.multi.label))
-	final_reward = ec.weight;
+        if (insert_only) {
+	    //cerr << "insert_only=1 cn=" << cn << endl;
+	        b.nodes[cn].examples_index.push_back(ec_array_index); // do the insert
+	        if (b.learn_at_leaf == true)
+	            learn_similarity_at_leaf(b, base, cn, ec);
+	        return 0.;
+        }
+        // get the reward
+        float final_reward = 0.;
+        int64_t closest_ec = pick_nearest(b, base, cn, ec);
+        if ((closest_ec != -1) && (b.examples[closest_ec]->l.multi.label == ec.l.multi.label))
+	        final_reward = ec.weight;
       
-      base.predict(ec, b.nodes[cn].base_router);
-      float prediction = ec.pred.scalar;
-      descent(b.nodes[cn], prediction); // faked descent
-      if((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size()+2 < b.max_nodes))
-	split_leaf(b, base, cn);
+        base.predict(ec, b.nodes[cn].base_router);
+        float prediction = ec.pred.scalar;
+        descent(b.nodes[cn], prediction); // faked descent
+        if((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size()+2 < b.max_nodes))
+	        split_leaf_hal(b, base, cn);
 
-      //cerr << "insert_only=0 cn=" << cn << " deviated=" << deviated << " final_reward=" << final_reward << " closest_ec=" << closest_ec << endl;
-      return final_reward;
+        //cerr << "insert_only=0 cn=" << cn << " deviated=" << deviated << " final_reward=" << final_reward << " closest_ec=" << closest_ec << endl;
+        return final_reward;
     }
 
     // inductive case: internal node
     float p_follow = (false && deviated) ? 1. : (1. - 1. / (float)(b.max_depth));
-    if (insert_only) p_follow = 1.;
+    if (insert_only) p_follow = 1.; 
     // get the current node's prediction
     base.predict(ec, b.nodes[cn].base_router);
     float prediction = ec.pred.scalar;
@@ -990,7 +992,7 @@ namespace memory_tree_ns
     //if ((!insert_only) && (merand48(b.all->random_state) < 1e-4))
     //  cerr << "final_reward=" << final_reward << "\tdeviate=" << deviate << "\tp_follow=" << p_follow << "\tips_reward=" << ips_reward << "\tobjective=" << objective << endl;
     // update
-    MULTICLASS::label_t mc = ec.l.multi; // save label
+    MULTICLASS::label_t mc = ec.l.multi;
     ec.l.simple = { objective < 0. ? -1.f : 1.f, fabs(objective) , 0. };
     base.learn(ec, b.nodes[cn].base_router);
     ec.l.multi = mc; // restore label
@@ -998,13 +1000,67 @@ namespace memory_tree_ns
     return final_reward;
   }
 
-  void insert_example_hal(memory_tree& b, base_learner& base, const uint32_t& ec_array_index) {
-    insert_example_hal_helper(b, base, ec_array_index, 0, false, true); // insert only
-    float final_reward = insert_example_hal_helper(b, base, ec_array_index, 0, false, false); // learn
-    b.cumulative_reward += final_reward;
-    b.cumulative_reward_count += 1.;
-  }
-  
+    float return_reward_from_node(memory_tree& b, base_learner& base, uint32_t cn, example& ec){
+        //example& ec = *b.examples[ec_array_index];
+        while(b.nodes[cn].internal != -1){
+            base.predict(ec, b.nodes[cn].base_router);
+            float prediction = ec.pred.scalar;
+            cn = prediction < 0 ? b.nodes[cn].left : b.nodes[cn].right;
+        }
+        //get to leaf now:
+        int64_t closest_ec = pick_nearest(b,base,cn, ec);  //location at b.examples.
+        float reward = 0.;
+        if ((closest_ec != -1) && (b.examples[closest_ec]->l.multi.label == ec.l.multi.label))
+            reward = 1.;
+
+        return reward;
+    }
+
+    void insert_example_without_ips(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, bool insert_only)
+    {
+        example& ec = *b.examples[ec_array_index];
+        uint32_t cn = 0;
+
+        while(b.nodes[cn].internal != -1) //internal nodes
+        {
+            float prediction = 0.;
+            //if (!insert_only) //do train the node first: 
+            if (true)
+            {
+                float reward_left_subtree = return_reward_from_node(b,base, b.nodes[cn].left, ec);
+                float reward_right_subtree= return_reward_from_node(b,base, b.nodes[cn].right, ec);
+                float objective = (1. - b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha*(reward_right_subtree-reward_left_subtree);
+
+                MULTICLASS::label_t mc = ec.l.multi;
+                ec.l.simple = {objective < 0. ? -1.f : 1.f, fabs(objective), 0.};
+                base.learn(ec, b.nodes[cn].base_router);
+                ec.l.multi = mc;
+            }
+            base.predict(ec, b.nodes[cn].base_router);
+            prediction = ec.pred.scalar;
+            cn = descent(b.nodes[cn], prediction);
+        }
+        //now we get to leaf: we only train the leaf predictor at the phase of insertion.
+        //we only split the node at the phase of insertion. (we do not need to split leaf at learn phase, as there won't be any new insertion.)
+        if (insert_only == true){
+            b.nodes[cn].examples_index.push_back(ec_array_index); //insert to the leaf.
+            if (b.learn_at_leaf == true)
+                learn_similarity_at_leaf(b,base,cn, ec);      
+            if ((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size() + 2 < b.max_nodes))
+                split_leaf_hal(b,base,cn);
+        }
+    }
+
+    void insert_example_hal(memory_tree& b, base_learner& base, const uint32_t& ec_array_index) 
+    {
+        //insert_example_hal_helper(b, base, ec_array_index, 0, false, true); // insert only
+        insert_example_without_ips(b, base, ec_array_index, true);
+        //float final_reward = insert_example_hal_helper(b, base, ec_array_index, 0, false, false); // learn
+        //insert_example_without_ips(b, base, ec_array_index, false);
+        //b.cumulative_reward += final_reward;
+        //b.cumulative_reward_count += 1.;
+    }
+
     //node here the ec is already stored in the b.examples, the task here is to rout it to the leaf, 
     //and insert the ec_array_index to the leaf.
     void insert_example(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, bool fake_insert = false)
@@ -1057,7 +1113,10 @@ namespace memory_tree_ns
             //uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf]; //ec_id is the postion of the sampled example in b.examples. 
             //re-insert:note that we do not have to 
             //restore the example into b.examples, as it's alreay there
-            insert_example(b, base, ec_id); 
+            //insert_example(b, base, ec_id); 
+            //insert_example_hal_helper(b, base, ec_id, 0, false, true); // insert only
+            //float final_reward = insert_example_hal_helper(b, base, ec_id, 0, false, false); // learn
+            insert_example_without_ips(b, base, ec_id, true);
         }
 
     }

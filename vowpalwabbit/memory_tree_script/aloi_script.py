@@ -18,9 +18,16 @@ loss = "squared"
 
 tree_node = int(2*passes*(num_of_classes*shots/(np.log(num_of_classes*shots)/np.log(2)*leaf_example_multiplier)));
 
+
+
 train_data = "aloi_train.vw"
 test_data = "aloi_test.vw"
-  
+if os.path.exists(train_data) is not True:
+        os.system("wget http://kalman.ml.cmu.edu/wen_datasets/{}".format(train_data))
+if os.path.exists(test_data) is not True:
+        os.system("wget http://kalman.ml.cmu.edu/wen_datasets/{}".format(test_data))
+
+
 saved_model = "{}.vw".format(train_data)
 
 print "## Training..."
