@@ -5,7 +5,7 @@ from IPython import embed
 
 
 available_shots = {'three':3, "one":1}
-available_shots = {'two':2}
+available_shots = {'one':1}
 
 for shot in available_shots.iterkeys():
     print "## perform experiments on {}-shot wikipara-10K ##".format(shot)
@@ -13,7 +13,7 @@ for shot in available_shots.iterkeys():
     num_of_classes = 10000
     leaf_example_multiplier = 2
     lr = 0.1
-    bits = 30
+    bits = 30#30
     passes = 3
     hal_version = 1
     learn_at_leaf = 0

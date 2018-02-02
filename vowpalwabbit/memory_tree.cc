@@ -1027,9 +1027,22 @@ namespace memory_tree_ns
             //if (!insert_only) //do train the node first: 
             if (true)
             {
-                float reward_left_subtree = return_reward_from_node(b,base, b.nodes[cn].left, ec);
-                float reward_right_subtree= return_reward_from_node(b,base, b.nodes[cn].right, ec);
-                float objective = (1. - b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha*(reward_right_subtree-reward_left_subtree);
+
+                //randomize it:
+                base.predict(ec, b.nodes[cn].base_router);
+                float curr_pred = ec.pred.scalar;
+                float prob_right = (std::max)(0.f, (std::min) (1.f, 0.5f * (1.f + 2.f*curr_pred)));
+                float coin = merand48(b.all->random_state) < prob_right ? 1.f : -1.f;
+                
+                float objective = 0.f;
+                if (coin == -1.f){ //go left
+                    float reward_left_subtree = return_reward_from_node(b,base, b.nodes[cn].left, ec);
+                    objective = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha*(-reward_left_subtree/(1.-prob_right))/2.;
+                }
+                else{ //go right:
+                    float reward_right_subtree= return_reward_from_node(b,base, b.nodes[cn].right, ec);
+                    objective = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha*(reward_right_subtree/prob_right)/2.;
+                }
 
                 MULTICLASS::label_t mc = ec.l.multi;
                 ec.l.simple = {objective < 0. ? -1.f : 1.f, fabs(objective), 0.};
@@ -1129,7 +1142,7 @@ namespace memory_tree_ns
             b.iter++;
             predict(b, base, ec);
             if (b.iter%5000 == 0)
-	      cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<", baseline: " <<(b.cumulative_reward/b.cumulative_reward_count)<<", max_depth: "<<b.max_depth<<endl;
+	            cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<", baseline: " <<(b.cumulative_reward/b.cumulative_reward_count)<<", max_depth: "<<b.max_depth<<endl;
 
             clock_t begin = clock();
             example* new_ec = &calloc_or_throw<example>();
