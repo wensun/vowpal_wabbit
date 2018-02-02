@@ -532,8 +532,9 @@ namespace memory_tree_ns
 
         if (b.nodes[cn].examples_index.size() >= 1){
             int loc_at_leaf = int(merand48(b.all->random_state)*b.nodes[cn].examples_index.size());
+	    uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf];
             pop_at_index(b.nodes[cn].examples_index, loc_at_leaf); 
-            return loc_at_leaf;
+            return ec_id;
         }
         else    
             return -1;
@@ -719,6 +720,53 @@ namespace memory_tree_ns
         }
     }
 
+    float insert_example_hal_helper(memory_tree& b, base_learner& base, example& ec, const uint32_t& ec_array_index, uint32_t cn, bool deviated, bool insert_only){
+    	//example& ec = *b.examples[ec_array_index]; //note the example stored in b.examples does not contain any node information
+	add_node_id_feature(b,base,cn,ec, b.namespace_2);
+	// base case: leaf
+	if (b.nodes[cn].internal == -1) {
+	    if (insert_only){ //if it's just for insert purpose, I do not care about get the final reward, simply just insert.
+	    	b.nodes[cn].examples_index.push_back(ec_array_index); // do the insert
+	    	if (b.learn_at_leaf == true)
+			learn_similarity_at_leaf(b, base, cn, ec);
+	    
+		//take care of a leaf with too many examples:
+	    	if ((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size() + 2 < b.max_nodes))
+		 	split_leaf(b,base,cn);
+
+		return 0.;
+	    }
+	    // get the reward if not insert_only (aka learning is happening)
+	    float final_reward = 0.;
+	    int64_t closest_ec = pick_nearest(b, base, cn, ec);
+	    if ((closest_ec != -1) && (b.examples[closest_ec]->l.multi.label == ec.l.multi.label))
+		    final_reward = 1.; //ec.weight
+	    return final_reward;
+	}
+
+	// inductive case: internal node
+	//float p_follow = (false && deviated) ? 1. : (1. - 1. / ((std::max)((float)(b.max_depth, 10.)))); //make sure the probabily of not deviating once (p_follow^depth) is not too small
+	float p_follow = 1. - 1. / std::max((float)(b.max_depth), 10.f); //make sure the probabily of not deviating once (p_follow^depth) is not too small
+	if (insert_only) p_follow = 1.; //determnistically insert if insert_only.
+	base.predict(ec, b.nodes[cn].depth);
+	float prediction = ec.pred.scalar;
+	bool deviate = merand48(b.all->random_state) > p_follow; //deviate = 1: do not follow prediction;
+	if (deviate) prediction = -prediction;
+	uint32_t newcn = descent(b.nodes[cn], prediction);
+	float final_reward = insert_example_hal_helper(b, base, ec, ec_array_index, newcn, deviated || deviate, insert_only);
+	float ips_reward = final_reward / (deviate ? (1. - p_follow) : p_follow); // IPS on the reward
+	if (prediction < 0) ips_reward = -ips_reward;
+	float objective = (1. - b.alpha) * log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha * ips_reward/2.;
+	
+	MULTICLASS::label_t mc = ec.l.multi;
+	ec.l.simple = { objective < 0. ? -1.f : 1.f, fabs(objective) , 0. };
+	base.learn(ec, b.nodes[cn].depth);
+	ec.l.multi = mc; // restore label
+	return final_reward;
+    }
+
+
+
     void predict(memory_tree& b, base_learner& base, example& test_ec)
     {
         example& ec = calloc_or_throw<example>();
@@ -789,9 +837,11 @@ namespace memory_tree_ns
     void experience_replay(memory_tree& b, base_learner& base)
     {
         uint32_t cn = 0; //start from root, randomly descent down! 
-        int loc_at_leaf = random_sample_example_pop(b, cn);
-        if (loc_at_leaf >= 0){
-            uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf]; //ec_id is the postion of the sampled example in b.examples. 
+        //int loc_at_leaf = random_sample_example_pop(b, cn);
+	int ec_id = random_sample_example_pop(b,cn);
+        //if (loc_at_leaf >= 0){
+	if (ec_id >= 0){
+            //uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf]; //ec_id is the postion of the sampled example in b.examples. 
             //re-insert:note that we do not have to 
             //restore the example into b.examples, as it's alreay there
 	    remove_node_id_feature(b, *b.examples[ec_id], b.namespace_2); //remove previously added features
