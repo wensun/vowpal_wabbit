@@ -9,10 +9,12 @@ print "## perform experiments on aloi ##"
 num_of_classes = 1000
 leaf_example_multiplier = 5
 shots = 100
-lr = 0.0001
+lr = 0.1
 bits = 30
+alpha = 0.2
 passes = 3
-learn_at_leaf = 1
+learn_at_leaf = 0
+num_queries = 1 #int(np.log(num_of_classes*shots))
 hal_version = 1
 loss = "squared"
 
@@ -32,8 +34,8 @@ saved_model = "{}.vw".format(train_data)
 
 print "## Training..."
 start = time.time()
-os.system(".././vw --memory_tree {} --learn_at_leaf {} --hal_version {} --leaf_example_multiplier {} -l {} -b {} -c --passes {} --loss_function {} --holdout_off {} -f {}".format(
-                tree_node, learn_at_leaf, hal_version, leaf_example_multiplier, lr, bits, passes, loss, train_data, saved_model))
+os.system(".././vw --memory_tree {} --learn_at_leaf {} --hal_version {} --num_queries {} --leaf_example_multiplier {} --Alpha {} -l {} -b {} -c --passes {} --loss_function {} --holdout_off {} -f {}".format(
+                tree_node, learn_at_leaf, hal_version, num_queries, leaf_example_multiplier, alpha, lr, bits, passes, loss, train_data, saved_model))
 train_time = time.time() - start
 
     #test:

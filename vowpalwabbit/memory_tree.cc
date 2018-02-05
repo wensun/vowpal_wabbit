@@ -420,12 +420,15 @@ namespace memory_tree_ns
         v_array<node> nodes;  //array of nodes.
         v_array<example*> examples; //array of example points
         
-        size_t max_leaf_examples; 
+        size_t max_leaf_examples;
+        uint32_t num_queries; 
         size_t max_nodes;
         size_t max_routers;
         float alpha; //for cpt type of update.
         size_t routers_used;
         int iter;
+
+        uint32_t total_num_queires; 
 
         size_t max_depth;
         size_t max_ex_in_leaf;
@@ -528,11 +531,13 @@ namespace memory_tree_ns
         b.nodes[0].internal = -1; //mark the root as leaf
         b.nodes[0].base_router = (b.routers_used++);
 
+        b.total_num_queires = 0;
         b.max_routers = b.max_nodes;
         cout<<"tree initiazliation is done...."<<endl
             <<"max nodes "<<b.max_nodes<<endl
             <<"tree size: "<<b.nodes.size()<<endl
-            <<"learn at leaf: "<<b.learn_at_leaf<<endl;
+            <<"learn at leaf: "<<b.learn_at_leaf<<endl
+            <<"num_queries per example: "<<b.num_queries<<endl;
     }
 
 
@@ -608,9 +613,8 @@ namespace memory_tree_ns
         float weighted_value = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr)/log(2.)+b.alpha*prediction;
         float route_label = weighted_value < 0.f ? -1.f : 1.f;
         
-
         //ec.l.simple = {route_label, imp_weight, 0.f}; 
-	ec.l.simple = {route_label, abs(weighted_value), 0.f};
+	    ec.l.simple = {route_label, abs(weighted_value), 0.f};
         base.learn(ec, b.nodes[cn].base_router); //update the router according to the new example.
         
         base.predict(ec, b.nodes[cn].base_router);
@@ -639,7 +643,7 @@ namespace memory_tree_ns
 
         if (b.nodes[cn].depth + 1 > b.max_depth){
             b.max_depth = b.nodes[cn].depth + 1;
-            //cout<<"depth "<<b.max_depth<<endl;
+            cout<<"depth "<<b.max_depth<<endl;
         }
 
         b.nodes[cn].left = left_child;
@@ -879,7 +883,7 @@ namespace memory_tree_ns
         if (std::max(b.nodes[cn].nl, b.nodes[cn].nr) > b.max_ex_in_leaf)
         {
             b.max_ex_in_leaf = std::max(b.nodes[cn].nl, b.nodes[cn].nr);
-            //cout<<b.max_ex_in_leaf<<endl;
+            //cout<<"max example in leaf now: "<<b.max_ex_in_leaf<<endl;
         }
     }
 
@@ -1016,6 +1020,107 @@ namespace memory_tree_ns
         return reward;
     }
 
+
+    float query_reward(memory_tree& b, base_learner& base, const uint32_t& leaf_id, example& ec){
+        b.total_num_queires ++;
+        
+        float reward = 0.f;
+        int64_t closest_ec = pick_nearest(b, base, leaf_id, ec);
+		if ((closest_ec != -1) && (b.examples[closest_ec]->l.multi.label == ec.l.multi.label))
+			reward = 1.; //ec.weight
+        
+        if (b.learn_at_leaf == true){
+            //float score = normalized_linear_prod(b, &ec, b.examples[closest_ec]);
+            example* kprod_ec = &calloc_or_throw<example>();
+            diag_kronecker_product_test(ec, *b.examples[closest_ec], *kprod_ec);
+            kprod_ec->l.simple = {reward, 1.f, 0.f};
+            base.learn(*kprod_ec, b.max_routers);
+            free_example(kprod_ec);
+        }
+        return reward;
+    }
+
+
+    void route_to_leaf(memory_tree& b, base_learner& base, const uint32_t & ec_array_index, uint32_t cn, v_array<uint32_t>& path, bool insertion){
+		example& ec = *b.examples[ec_array_index];
+        path.erase();
+		while(b.nodes[cn].internal != -1){
+			path.push_back(cn);  //path stores node id from the root to the leaf
+			base.predict(ec, b.nodes[cn].base_router);
+			float prediction = ec.pred.scalar;
+			if (insertion == false)
+				cn = prediction < 0 ? b.nodes[cn].left : b.nodes[cn].right;
+			else
+			    cn = descent(b.nodes[cn], prediction);
+		}
+		path.push_back(cn); //push back the leaf 
+        //cout<<"at route to leaf: "<<path.size()<<endl;
+		if (insertion == true){
+			b.nodes[cn].examples_index.push_back(ec_array_index);
+			if ((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size() + 2 < b.max_nodes))
+				split_leaf(b,base,cn);
+		}
+	}
+
+    void query_and_learn(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, const uint32_t& K)
+    {
+        v_array<uint32_t> path_to_leaf = v_init<uint32_t>();
+		example& ec = *b.examples[ec_array_index];
+		route_to_leaf(b, base, ec_array_index, 0, path_to_leaf, false);
+        //cout<<"at query and learn 1: "<<path_to_leaf.size()<<endl;
+
+        if (path_to_leaf.size() > 1){
+            uint32_t leaf_id = path_to_leaf[path_to_leaf.size()-1];
+            float reward_from_path = query_reward(b, base, leaf_id, ec);
+
+            v_array<uint32_t> sample_pos = v_init<uint32_t>();
+            uint32_t query_times = (std::min) (uint32_t(path_to_leaf.size()-1), K);
+            //cout<<path_to_leaf.size()<<" "<<K<<" "<<query_times<<endl;
+            for (uint32_t i = 0; i < path_to_leaf.size() - 1; i++){ //go through the nodes in path, with probablity query_times/total_length, chose this node. hence, in average, we chose query_times nodes for explore
+                bool choosen = merand48(b.all->random_state) < (query_times*1.f /(path_to_leaf.size()*1.f - 1.f));
+                if (choosen)
+                    sample_pos.push_back(i);
+            }
+            //explore at each choosen node:
+            //cout<<"query times at this example: "<<sample_pos.size()<<endl;
+            for (auto pos : sample_pos){
+                uint32_t cn = path_to_leaf[pos];
+                base.predict(ec, b.nodes[cn].base_router);
+                float prediction = ec.pred.scalar;
+                float p_follow = (std::max)(0.f, (std::min)(1.f, 0.5f*(1.f+2.f*fabs(prediction)))); //prob of follow ranging from (0.5, 0.99)
+			    bool deviate = merand48(b.all->random_state) > p_follow;
+			    if (deviate) prediction = -prediction; //flip the sign of prediction is deviate is true
+                
+                float final_reward = 0.f;
+                if (deviate){
+                    uint32_t deviated_to_node_id = prediction > 0 ? b.nodes[cn].right : b.nodes[cn].left;
+                    v_array<uint32_t> deivated_path = v_init<uint32_t>();//query new path.
+				    route_to_leaf(b, base, ec_array_index, deviated_to_node_id, deivated_path, false);
+                    //cout<<"at query and learn 2: "<<deivated_path.size()<<endl;
+				    uint32_t deviated_leaf_id = deivated_path[deivated_path.size() - 1]; //get the leaf from the deviated path
+				    deivated_path.delete_v(); //free memory
+                    final_reward = query_reward(b, base, deviated_leaf_id, ec);  //query happens here
+                }
+                else
+                    final_reward = reward_from_path;
+
+                float ips_reward = final_reward / (deviate ? (1. - p_follow) : p_follow); // IPS on the reward
+			    if (prediction < 0) ips_reward = -ips_reward;
+			    float objective = (1. - b.alpha) * log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha * ips_reward/2.;
+			    MULTICLASS::label_t mc = ec.l.multi;
+			    ec.l.simple = { objective < 0. ? -1.f : 1.f, fabs(objective) , 0. };
+                base.learn(ec, b.nodes[cn].base_router);
+                ec.l.multi = mc;
+            }
+            sample_pos.delete_v();
+        }
+        //once we finish updating, we officially insert the example to the memory. 
+        //path_to_leaf.erase();
+        route_to_leaf(b, base, ec_array_index, 0, path_to_leaf, true); //insert
+        //cout<<"at query and learn 3: "<<path_to_leaf.size()<<endl;
+        path_to_leaf.delete_v();
+    }
+
     void insert_example_without_ips(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, bool insert_only)
     {
         example& ec = *b.examples[ec_array_index];
@@ -1067,7 +1172,9 @@ namespace memory_tree_ns
     void insert_example_hal(memory_tree& b, base_learner& base, const uint32_t& ec_array_index) 
     {
         //insert_example_hal_helper(b, base, ec_array_index, 0, false, true); // insert only
-        insert_example_without_ips(b, base, ec_array_index, true);
+        //insert_example_without_ips(b, base, ec_array_index, true);
+        query_and_learn(b, base, ec_array_index, b.num_queries);
+        
         //float final_reward = insert_example_hal_helper(b, base, ec_array_index, 0, false, false); // learn
         //insert_example_without_ips(b, base, ec_array_index, false);
         //b.cumulative_reward += final_reward;
@@ -1129,7 +1236,10 @@ namespace memory_tree_ns
             //insert_example(b, base, ec_id); 
             //insert_example_hal_helper(b, base, ec_id, 0, false, true); // insert only
             //float final_reward = insert_example_hal_helper(b, base, ec_id, 0, false, false); // learn
-            insert_example_without_ips(b, base, ec_id, true);
+            //insert_example_without_ips(b, base, ec_id, true);
+            v_array<uint32_t> tmp_path = v_init<uint32_t>();
+            route_to_leaf(b, base, ec_id, 0, tmp_path, true);
+            tmp_path.delete_v();
         }
 
     }
@@ -1142,7 +1252,7 @@ namespace memory_tree_ns
             b.iter++;
             predict(b, base, ec);
             if (b.iter%5000 == 0)
-	            cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<", baseline: " <<(b.cumulative_reward/b.cumulative_reward_count)<<", max_depth: "<<b.max_depth<<endl;
+	            cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<", total num queires so far: "<<b.total_num_queires<<", max depth: "<<b.max_depth<<", max exp in leaf: "<<b.max_ex_in_leaf<<endl;
 
             clock_t begin = clock();
             example* new_ec = &calloc_or_throw<example>();
@@ -1357,6 +1467,7 @@ base_learner* memory_tree_setup(vw& all)
       ("leaf_example_multiplier", po::value<uint32_t>()->default_value(1.0), "multiplier on examples per leaf (default = log nodes)")
       ("hal_version", po::value<bool>()->default_value(false), "use reward based optimization")
       ("learn_at_leaf", po::value<bool>()->default_value(true), "whether or not learn at leaf (defualt = True)")
+      ("num_queries", po::value<uint32_t>()->default_value(1.), "number of returned queries per example (<= log nodes")
       ("Alpha", po::value<float>()->default_value(0.1), "Alpha");
      add_options(all);
 
@@ -1371,6 +1482,12 @@ base_learner* memory_tree_setup(vw& all)
 	tree.max_leaf_examples = vm["leaf_example_multiplier"].as<uint32_t>() * (log(tree.max_nodes)/log(2));
 	*all.file_options << " --leaf_example_multiplier " << vm["leaf_example_multiplier"].as<uint32_t>();
       }
+
+    if (vm.count("num_queries")){
+        tree.num_queries = vm["num_queries"].as<uint32_t>(); 
+        *all.file_options << " --num_queries "<< vm["num_queries"].as<uint32_t>();
+    }
+
     if (vm.count("Alpha"))
       {
 	tree.alpha = vm["Alpha"].as<float>();
