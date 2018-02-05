@@ -14,7 +14,7 @@ bits = 30
 alpha = 0.2
 passes = 3
 learn_at_leaf = 0
-num_queries = 1 #int(np.log(num_of_classes*shots))
+num_queries = 3 #int(np.log(num_of_classes*shots))
 hal_version = 1
 loss = "squared"
 
