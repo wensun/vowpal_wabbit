@@ -744,7 +744,7 @@ namespace memory_tree_ns
 			remove_node_id_feature(b, ec, b.namespace_2);
 			float prediction = ec.pred.scalar;
 			if (insertion == false)
-				cn = prediction > 0 ? b.nodes[cn].right : b.nodes[cn].left;
+				cn = prediction < 0 ? b.nodes[cn].left : b.nodes[cn].right;
 			else
 				cn = descent(b.nodes[cn], prediction);
 		}

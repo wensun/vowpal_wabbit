@@ -8,7 +8,7 @@ shot = 100
 print "## perform experiments on {}-shot aloi dataset ##".format(shot)
 shots = shot
 num_of_classes = 1000
-leaf_example_multiplier = 10
+leaf_example_multiplier = 5
 lr = 0.1
 bits = 29
 alpha = 0.5
