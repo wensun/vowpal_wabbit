@@ -102,19 +102,19 @@ namespace memory_tree_ns
 
     void move_features_to_one_namespace(example* dst, example* src, unsigned char namespace_1)
     {
-    	copy_example_data(dst, src, true);
-	dst->indices.delete_v();
-	dst->indices.push_back(namespace_1);
-	dst->num_features = 0;
-	dst->total_sum_feat_sq = 0.0;
-	for (auto nc : src->indices)
-	{
-	    for (size_t i = 0; i < src->feature_space[nc].indicies.size(); i++){
-	    	dst->feature_space[namespace_1].push_back(src->feature_space[nc].values[i], src->feature_space[nc].indicies[i]);
-		dst->num_features ++;
-		dst->total_sum_feat_sq += pow(src->feature_space[nc].values[i],2);
+        copy_example_data(dst, src, true);
+	    dst->indices.delete_v();
+	    dst->indices.push_back(namespace_1);
+	    dst->num_features = 0;
+	    dst->total_sum_feat_sq = 0.0;
+	    for (auto nc : src->indices)
+	    {
+	        for (size_t i = 0; i < src->feature_space[nc].indicies.size(); i++){
+	    	    dst->feature_space[namespace_1].push_back(src->feature_space[nc].values[i], src->feature_space[nc].indicies[i]);
+		        dst->num_features ++;
+		        dst->total_sum_feat_sq += pow(src->feature_space[nc].values[i],2);
+	        }
 	    }
-	}
     }
 
     inline void free_example(example* ec)
@@ -471,13 +471,14 @@ namespace memory_tree_ns
     {
         srand48(4000);
         //simple initilization: initilize the root only
-	b.namespace_1 = 'a';
-	b.namespace_2 = 'b';
+	    b.namespace_1 = 'a';
+	    b.namespace_2 = 'b';
         b.routers_used = 0;
         b.nodes.push_back(node());
         b.nodes[0].internal = -1; //mark the root as leaf
-	b.nodes[0].depth = 0;
+	    b.nodes[0].depth = 0;
 
+        b.max_routers = b.max_nodes;
         cout<<"tree initiazliation is done...."<<endl
             <<"max nodes "<<b.max_nodes<<endl
             <<"tree size: "<<b.nodes.size()<<endl
@@ -550,8 +551,8 @@ namespace memory_tree_ns
         uint64_t mask = all->weights.mask();
         size_t ss = all->weights.stride_shift();
 
-	if (cn == 0)
-            ec.indices.push_back (namespace_2);
+	//if (cn == 0)
+        ec.indices.push_back (namespace_2);
         features& fs = ec.feature_space[namespace_2];
 
         //node_only option:
@@ -576,19 +577,25 @@ namespace memory_tree_ns
         //note: here we first train the router and then predict.
         MULTICLASS::label_t mc = ec.l.multi;
         uint32_t save_multi_pred = ec.pred.multiclass;
-	add_node_id_feature(b,base,cn,ec, b.namespace_2);
+	    
+        add_node_id_feature(b,base,cn,ec, b.namespace_2);
         ec.l.simple = {FLT_MAX,0.f, 0.f};
-        base.predict(ec, b.nodes[cn].depth);
+        base.predict(ec, b.nodes[cn].depth+1);
+        remove_node_id_feature(b,ec,b.namespace_2);
+
         float prediction = ec.pred.scalar; 
         float imp_weight = 1.f; //no importance weight.
         
         double weighted_value = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr)/log(2.)+b.alpha*prediction;
         float route_label = weighted_value < 0.f ? -1.f : 1.f;
         
+        add_node_id_feature(b,base,cn,ec,b.namespace_2);
         ec.l.simple = {route_label, imp_weight, 0.f};
-	base.learn(ec, b.nodes[cn].depth); //update the router according to the new example. depth-wise router
-	ec.l.simple = {FLT_MAX,0.f, 0.f};
-        base.predict(ec, b.nodes[cn].depth);
+	    base.learn(ec, b.nodes[cn].depth+1); //update the router according to the new example. depth-wise router
+	    //ec.l.simple = {FLT_MAX,0.f, 0.f};
+        base.predict(ec, b.nodes[cn].depth+1);
+        remove_node_id_feature(b, ec, b.namespace_2);
+
         float save_binary_scalar = ec.pred.scalar; //depth wise router. 
 
         ec.l.multi = mc;
@@ -632,8 +639,12 @@ namespace memory_tree_ns
             uint32_t ec_pos = b.nodes[cn].examples_index[ec_id];
             MULTICLASS::label_t mc = b.examples[ec_pos]->l.multi;
             uint32_t save_multi_pred = b.examples[ec_pos]->pred.multiclass;
+
+            add_node_id_feature(b,base,cn,*b.examples[ec_pos], b.namespace_2); //add the current node id feature
             b.examples[ec_pos]->l.simple = {1.f, 1.f, 0.f};
-            base.predict(*b.examples[ec_pos], b.nodes[cn].depth); //re-predict
+            base.predict(*b.examples[ec_pos], b.nodes[cn].depth+1); //re-predict
+            remove_node_id_feature(b, *b.examples[ec_pos], b.namespace_2);
+            
             float scalar = b.examples[ec_pos]->pred.scalar;
             if (scalar < 0)
             {
@@ -680,7 +691,8 @@ namespace memory_tree_ns
                     example* kprod_ec = &calloc_or_throw<example>();
                     diag_kronecker_product_test(ec, *b.examples[loc], *kprod_ec);
                     kprod_ec->l.simple = {FLT_MAX, 1., tmp_s};
-                    base.predict(*kprod_ec, b.max_routers);
+                    base.predict(*kprod_ec, 0);
+		    //score = kprod_ec->pred.scalar;
                     score = kprod_ec->partial_prediction;
                     free_example(kprod_ec);
                 }
@@ -705,36 +717,109 @@ namespace memory_tree_ns
             example* ec_loc = b.examples[loc];
             //float score = -compute_l2_distance(b, &ec, ec_loc); //score based on the l2_distance. 
             float score = normalized_linear_prod(b, &ec, ec_loc);
-            //score = 0.0;
+            score = 0.f; //-score;
             example* kprod_ec = &calloc_or_throw<example>();
             diag_kronecker_product_test(ec, *ec_loc, *kprod_ec);
-            //
-            if (ec.l.multi.label == b.examples[loc]->l.multi.label) //reward = 1:    
-                kprod_ec->l.simple = {1., 1., -score};
-            else
+	    float weight = 1.f; //fabs(0.5 - score);
+            if (ec.l.multi.label == b.examples[loc]->l.multi.label){ //reward = 1:    
+                kprod_ec->l.simple = {1., weight, -score};
+	    }
+            else{
                 //kprod_ec->l.simple = {-1., 1., score}; //reward = 0:
-                kprod_ec->l.simple = {-0., 1., -score};
+                kprod_ec->l.simple = {0., weight, -score};
+	    }
         
-            base.learn(*kprod_ec, b.max_routers);
+            base.learn(*kprod_ec, 0);
             free_example(kprod_ec);
         }
     }
 
-    float insert_example_hal_helper(memory_tree& b, base_learner& base, example& ec, const uint32_t& ec_array_index, uint32_t cn, bool deviated, bool insert_only){
-    	//example& ec = *b.examples[ec_array_index]; //note the example stored in b.examples does not contain any node information
-	add_node_id_feature(b,base,cn,ec, b.namespace_2);
+
+	void route_to_leaf(memory_tree& b, base_learner& base, const uint32_t & ec_array_index, uint32_t cn, v_array<uint32_t>& path, bool insertion, bool replay){
+		example& ec = *b.examples[ec_array_index];
+		while(b.nodes[cn].internal != -1){
+			path.push_back(cn);  //path stores node id from the root to the leaf
+			add_node_id_feature(b,base,cn,ec, b.namespace_2);
+			base.predict(ec, b.nodes[cn].depth+1);
+			remove_node_id_feature(b, ec, b.namespace_2);
+			float prediction = ec.pred.scalar;
+			if (insertion == false)
+				cn = prediction > 0 ? b.nodes[cn].right : b.nodes[cn].left;
+			else
+				cn = descent(b.nodes[cn], prediction);
+		}
+		path.push_back(cn); //push back the leaf 
+
+		if (insertion == true){
+			if (b.learn_at_leaf == true && replay == false)
+				learn_similarity_at_leaf(b, base, cn, ec);
+			b.nodes[cn].examples_index.push_back(ec_array_index);
+			if ((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size() + 2 < b.max_nodes))
+				split_leaf(b,base,cn);
+		}
+	}
+
+	//in this function, we randomly sample a time step, and then explore, and then learn at the sampled time step
+	void deivate_and_learn(memory_tree& b, base_learner& base, const uint32_t& ec_array_index){
+		v_array<uint32_t> path_to_leaf = v_init<uint32_t>();
+		example& ec = *b.examples[ec_array_index];
+		route_to_leaf(b, base, ec_array_index, 0, path_to_leaf, false, false);
+
+		if (path_to_leaf.size() > 1){ //more than the root , i.e., we do not perform learning while there is only one node.
+			uint32_t explore_depth = uint32_t(merand48(b.all->random_state) * (path_to_leaf.size()-1)); //randomly pick one of the internal node along the path
+			uint32_t explore_node_id = path_to_leaf[explore_depth];
+			add_node_id_feature(b,base, explore_node_id, ec, b.namespace_2);
+			base.predict(ec, b.nodes[explore_node_id].depth+1);
+			remove_node_id_feature(b, ec, b.namespace_2);
+
+			//we explore at this node proportional to the prediction: the more confident the prediction, the less exploration
+			float prediction = ec.pred.scalar;
+			float p_follow = (std::max)(0.f, (std::min)(0.99f, 0.5f*(1.f+2.f*fabs(prediction)))); //prob of follow ranging from (0., 0.99)
+			bool deviate = merand48(b.all->random_state) > p_follow;
+			if (deviate) prediction = -prediction; //flip the sign of prediction is deviate is true
+
+			float final_reward = 0; //get the reward from the sub-tree based on the flag deviate
+			uint32_t leaf_id = 0;
+			if (deviate == false)
+				leaf_id = path_to_leaf[path_to_leaf.size()-1];  //no deivate, simply grad leaf_id from the path_to_leaf.
+			else{ //we deivated here:
+				uint32_t deviated_to_node_id = prediction > 0 ? b.nodes[explore_node_id].right : b.nodes[explore_node_id].left; //node, prediction is already flipped sign as deivate is true
+				v_array<uint32_t> deivated_path = v_init<uint32_t>();//query new path.
+				route_to_leaf(b, base, ec_array_index, deviated_to_node_id, deivated_path, false, false);
+				leaf_id = deivated_path[deivated_path.size() - 1]; //get the leaf from the deviated path
+				deivated_path.delete_v(); //free memory
+			}
+			int64_t closest_ec = pick_nearest(b, base, leaf_id, ec);
+			if ((closest_ec != -1) && (b.examples[closest_ec]->l.multi.label == ec.l.multi.label))
+				final_reward = 1.; //ec.weight
+
+			float ips_reward = final_reward / (deviate ? (1. - p_follow) : p_follow); // IPS on the reward
+			if (prediction < 0) ips_reward = -ips_reward;
+			float objective = (1. - b.alpha) * log(b.nodes[explore_node_id].nl/b.nodes[explore_node_id].nr) + b.alpha * ips_reward/2.;
+			MULTICLASS::label_t mc = ec.l.multi;
+			ec.l.simple = { objective < 0. ? -1.f : 1.f, fabs(objective) , 0. };
+			add_node_id_feature(b,base, explore_node_id, ec, b.namespace_2);
+			base.learn(ec, b.nodes[explore_node_id].depth+1);
+			remove_node_id_feature(b,ec,b.namespace_2);
+			ec.l.multi = mc; // restore label
+		}
+		path_to_leaf.delete_v();
+	}
+
+    float insert_example_hal_helper(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, bool deviated, uint32_t cn, bool insert_only){
+    example& ec = *b.examples[ec_array_index]; //note the example stored in b.examples does not contain any node information
 	// base case: leaf
 	if (b.nodes[cn].internal == -1) {
 	    if (insert_only){ //if it's just for insert purpose, I do not care about get the final reward, simply just insert.
 	    	b.nodes[cn].examples_index.push_back(ec_array_index); // do the insert
 	    	if (b.learn_at_leaf == true)
-			learn_similarity_at_leaf(b, base, cn, ec);
+			    learn_similarity_at_leaf(b, base, cn, ec);
 	    
-		//take care of a leaf with too many examples:
+		    //take care of a leaf with too many examples:
 	    	if ((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size() + 2 < b.max_nodes))
-		 	split_leaf(b,base,cn);
+		 	    split_leaf(b,base,cn);
 
-		return 0.;
+		    return 0.;
 	    }
 	    // get the reward if not insert_only (aka learning is happening)
 	    float final_reward = 0.;
@@ -743,25 +828,32 @@ namespace memory_tree_ns
 		    final_reward = 1.; //ec.weight
 	    return final_reward;
 	}
+    	add_node_id_feature(b,base,cn,ec, b.namespace_2); //add the current node id feature
+	base.predict(ec, b.nodes[cn].depth+1);
+    	remove_node_id_feature(b, ec, b.namespace_2);
 
-	// inductive case: internal node
-	//float p_follow = (false && deviated) ? 1. : (1. - 1. / ((std::max)((float)(b.max_depth, 10.)))); //make sure the probabily of not deviating once (p_follow^depth) is not too small
-	float p_follow = 1. - 1. / std::max((float)(b.max_depth), 10.f); //make sure the probabily of not deviating once (p_follow^depth) is not too small
-	if (insert_only) p_follow = 1.; //determnistically insert if insert_only.
-	base.predict(ec, b.nodes[cn].depth);
 	float prediction = ec.pred.scalar;
+
+    	float p_follow = deviated ? 1 : (std::max)(0.f, (std::min)(1.f, 0.5f*(1.f+2.f*fabs(prediction))));
+    	if (insert_only) p_follow = 1.; //determnistically insert if insert_only.
+
 	bool deviate = merand48(b.all->random_state) > p_follow; //deviate = 1: do not follow prediction;
 	if (deviate) prediction = -prediction;
 	uint32_t newcn = descent(b.nodes[cn], prediction);
-	float final_reward = insert_example_hal_helper(b, base, ec, ec_array_index, newcn, deviated || deviate, insert_only);
-	float ips_reward = final_reward / (deviate ? (1. - p_follow) : p_follow); // IPS on the reward
-	if (prediction < 0) ips_reward = -ips_reward;
-	float objective = (1. - b.alpha) * log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha * ips_reward/2.;
+	float final_reward = insert_example_hal_helper(b, base, ec_array_index, deviated || deviate, newcn, insert_only);
 	
-	MULTICLASS::label_t mc = ec.l.multi;
-	ec.l.simple = { objective < 0. ? -1.f : 1.f, fabs(objective) , 0. };
-	base.learn(ec, b.nodes[cn].depth);
-	ec.l.multi = mc; // restore label
+	if (deviated == false && deviate == true){  //we force to only deivate once in one rollout, and we update only when we deivate, as this gives a unbiased estimate of rewrad.
+		float ips_reward = final_reward / (deviate ? (1. - p_follow) : p_follow); // IPS on the reward
+		if (prediction < 0) ips_reward = -ips_reward;
+		float objective = (1. - b.alpha) * log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha * ips_reward/2.;
+		MULTICLASS::label_t mc = ec.l.multi;
+		ec.l.simple = { objective < 0. ? -1.f : 1.f, fabs(objective) , 0. };
+    		add_node_id_feature(b,base, cn, ec, b.namespace_2);
+		base.learn(ec, b.nodes[cn].depth+1);
+    		remove_node_id_feature(b,ec,b.namespace_2);
+		ec.l.multi = mc; // restore label
+	}
+
 	return final_reward;
     }
 
@@ -771,7 +863,7 @@ namespace memory_tree_ns
     {
         example& ec = calloc_or_throw<example>();
         //ec = *b.examples[b.iter];
-	move_features_to_one_namespace(&ec, &test_ec, b.namespace_1);
+	    move_features_to_one_namespace(&ec, &test_ec, b.namespace_1);
         remove_repeat_features_in_ec(ec);
         
         MULTICLASS::label_t mc = ec.l.multi;
@@ -780,8 +872,10 @@ namespace memory_tree_ns
         ec.l.simple = {-1.f, 1.f, 0.};
         while(b.nodes[cn].internal == 1) //if it's internal
         {
-	    add_node_id_feature(b,base,cn,ec, b.namespace_2);
-            base.predict(ec, b.nodes[cn].depth);
+	        add_node_id_feature(b,base,cn,ec, b.namespace_2);
+            base.predict(ec, b.nodes[cn].depth+1);
+            remove_node_id_feature(b, ec, b.namespace_2);
+
             uint32_t newcn = ec.pred.scalar < 0 ? b.nodes[cn].left : b.nodes[cn].right; //do not need to increment nl and nr.
             cn = newcn;
         }
@@ -834,18 +928,33 @@ namespace memory_tree_ns
         }
     }
 
+    void insert_example_hal(memory_tree& b, base_learner& base, const uint32_t& ec_array_index){
+       //insert_example_hal_helper(b,base, ec_array_index, false, 0, true); //insert
+       //insert_example_hal_helper(b,base, ec_array_index, false, 0, false);  //learn
+       
+	    deivate_and_learn(b, base, ec_array_index); //learn first
+	    v_array<uint32_t> tmp_path = v_init<uint32_t>();
+	    route_to_leaf(b, base, ec_array_index, 0, tmp_path, true, false); //insert 
+	    tmp_path.delete_v();
+    }
+
     void experience_replay(memory_tree& b, base_learner& base)
     {
         uint32_t cn = 0; //start from root, randomly descent down! 
         //int loc_at_leaf = random_sample_example_pop(b, cn);
-	int ec_id = random_sample_example_pop(b,cn);
+	    int ec_id = random_sample_example_pop(b,cn);
         //if (loc_at_leaf >= 0){
-	if (ec_id >= 0){
+	    if (ec_id >= 0){
             //uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf]; //ec_id is the postion of the sampled example in b.examples. 
             //re-insert:note that we do not have to 
             //restore the example into b.examples, as it's alreay there
-	    remove_node_id_feature(b, *b.examples[ec_id], b.namespace_2); //remove previously added features
-            insert_example(b, base, ec_id); //re-insert (no)
+	        //remove_node_id_feature(b, *b.examples[ec_id], b.namespace_2); //remove previously added features
+            //insert_example(b, base, ec_id); //re-insert (no)
+            //insert_example_hal_helper(b,base, ec_id, false, 0, true); //insert
+	    
+	    v_array<uint32_t> tmp_path = v_init<uint32_t>();
+	    route_to_leaf(b, base, ec_id, 0, tmp_path, true, true);
+	    tmp_path.delete_v();
         }
 
     }
@@ -862,12 +971,13 @@ namespace memory_tree_ns
 
             clock_t begin = clock();
             example* new_ec = &calloc_or_throw<example>();
-	    move_features_to_one_namespace(new_ec, &ec, b.namespace_1);
+	        move_features_to_one_namespace(new_ec, &ec, b.namespace_1);
             remove_repeat_features_in_ec(*new_ec); ////sort unique.
             b.examples.push_back(new_ec);   
             b.num_ecs++; 
 
-            insert_example(b, base, b.examples.size()-1);
+            //insert_example(b, base, b.examples.size()-1);
+            insert_example_hal(b,base, b.examples.size()-1);
             //if (b.iter % 1 == 0)
             for (int i = 0; i < 1; i++)
                 experience_replay(b, base);
