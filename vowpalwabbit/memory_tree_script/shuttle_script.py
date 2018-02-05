@@ -5,12 +5,12 @@ import numpy as np
 
 num_of_classes = 7
 num_examples = 46000
-leaf_example_multiplier = 2
+leaf_example_multiplier = 10
 lr = 0.1
-bits = 28
+bits = 29
+Alpha = 0.1
 passes = 1
-learn_at_leaf = 0
-router_error_feature = 0
+learn_at_leaf = 1
 random = 0
 loss = "squared"
 
@@ -22,8 +22,8 @@ if os.path.exists(train_data) is not True:
 saved_model = "shuttle_tree.vw"
 
 start = time.time()
-os.system(".././vw --memory_tree {} --learn_at_leaf {} --leaf_example_multiplier {} --loss_function {} --random_weights {} -l {} -b {} -q {} -c --passes {} --holdout_off {} -f {}".format(
-                tree_node, learn_at_leaf,  leaf_example_multiplier, loss, random, lr, bits, 'ab', passes, train_data, saved_model))
+os.system(".././vw --memory_tree {} --learn_at_leaf {} --leaf_example_multiplier {} --Alpha {} --loss_function {} --random_weights {} -l {} -b {} -q {} -c --passes {} --holdout_off {} -f {}".format(
+                tree_node, learn_at_leaf,  leaf_example_multiplier, Alpha, loss, random, lr, bits, 'ab', passes, train_data, saved_model))
 train_time = time.time() - start
 
 #test:

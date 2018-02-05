@@ -5,7 +5,7 @@ import numpy as np
 
 
 available_shots = {'three':3, "one":1}
-available_shots = {'three':3}
+available_shots = {'ten':10}
 
 for shot in available_shots.iterkeys():
     print "## perform experiments on {}-shot wikipara-10K ##".format(shot)
@@ -13,7 +13,7 @@ for shot in available_shots.iterkeys():
     num_of_classes = 10000
     leaf_example_multiplier = 2
     lr = 0.1
-    bits = 31
+    bits = 28
     passes = 3
     learn_at_leaf = 0
     loss = "squared"

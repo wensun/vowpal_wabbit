@@ -5,10 +5,11 @@ import numpy as np
 
 num_of_classes = 90
 num_examples = 464000
-leaf_example_multiplier = 2
+leaf_example_multiplier = 5
 lr = 1
 bits = 29
 passes = 1
+alpha = 0.2
 learn_at_leaf = 0
 router_error_feature = 0
 random = 0
@@ -22,8 +23,8 @@ if os.path.exists(train_data) is not True:
 saved_model = "{}_tree.vw".format(train_data)
 
 start = time.time()
-os.system(".././vw --memory_tree {} --learn_at_leaf {} --leaf_example_multiplier {} --loss_function {} --random_weights {} -l {} -b {} -q {} -c --passes {} --holdout_off {} -f {}".format(
-                tree_node, learn_at_leaf, leaf_example_multiplier, loss, random, lr, bits, 'ab', passes, train_data, saved_model))
+os.system(".././vw --memory_tree {} --learn_at_leaf {} --leaf_example_multiplier {} --Alpha {} --loss_function {} --random_weights {} -l {} -b {} -q {} -c --passes {} --holdout_off {} -f {}".format(
+                tree_node, learn_at_leaf, leaf_example_multiplier, alpha, loss, random, lr, bits, 'ab', passes, train_data, saved_model))
 train_time = time.time() - start
 
 #test:
