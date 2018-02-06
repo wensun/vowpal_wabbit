@@ -7,20 +7,18 @@ from IPython import embed
 #for shot in available_shots.iterkeys():
 print "## perform experiments on aloi ##"
 num_of_classes = 1000
-leaf_example_multiplier = 5
+leaf_example_multiplier = 1
 shots = 100
 lr = 0.1
-bits = 30
-alpha = 0.2
-passes = 3
-learn_at_leaf = 0
-num_queries = 3 #int(np.log(num_of_classes*shots))
+bits = 29
+alpha = 0.3
+passes = 5
+learn_at_leaf = 1
+num_queries =  5 #int(np.log(passes*num_of_classes*shots))
 hal_version = 1
 loss = "squared"
 
 tree_node = int(2*passes*(num_of_classes*shots/(np.log(num_of_classes*shots)/np.log(2)*leaf_example_multiplier)));
-
-
 
 train_data = "aloi_train.vw"
 test_data = "aloi_test.vw"
