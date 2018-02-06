@@ -1148,7 +1148,8 @@ namespace memory_tree_ns
                 //randomize it:
                 base.predict(ec, b.nodes[cn].base_router);
                 float curr_pred = ec.pred.scalar;
-                float prob_right = (std::max)(0.f, (std::min) (0.99f, 0.5f * (1.f + 2.f*curr_pred)));
+                float prob_right = (std::max)(0.0f, (std::min) (1.f, 0.5f * (1.f + 2.f*curr_pred)));
+                prob_right = 0.9f*prob_right + 0.1f/2.f;
                 float coin = merand48(b.all->random_state) < prob_right ? 1.f : -1.f;
                 
                 float objective = 0.f;
@@ -1161,10 +1162,21 @@ namespace memory_tree_ns
                     objective = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha*(reward_right_subtree/prob_right)/2.;
                 }
 
+                float ec_input_weight = ec.weight;
                 MULTICLASS::label_t mc = ec.l.multi;
-                ec.l.simple = {objective < 0. ? -1.f : 1.f, fabs(objective), 0.};
+                //ec.l.simple.label = (objective < 0. ? -1.f : 1.f);
+
+                ec.weight = fabs(objective);
+                if (ec.weight >= 100.f)
+                    ec.weight = 100.f;
+                else if (ec.weight < .01f)
+                    ec.weight = 0.01f;
+                    
+                //ec.weight = (fabs(objective) <= 0.001 ? 1 : fabs(objective)); 
+                ec.l.simple = {objective < 0. ? -1.f : 1.f, 1.f, 0.};
                 base.learn(ec, b.nodes[cn].base_router);
                 ec.l.multi = mc;
+                ec.weight = ec_input_weight; //restore the original weight
             }
             base.predict(ec, b.nodes[cn].base_router);
             prediction = ec.pred.scalar;
