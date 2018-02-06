@@ -427,11 +427,14 @@ namespace memory_tree_ns
         float alpha; //for cpt type of update.
         size_t routers_used;
         int iter;
+        uint32_t dream_repeats; //number of dream operations per example.
 
         uint32_t total_num_queires; 
 
         size_t max_depth;
         size_t max_ex_in_leaf;
+
+        bool bandit;
 
         float construct_time;
         float test_time;
@@ -537,7 +540,9 @@ namespace memory_tree_ns
             <<"max nodes "<<b.max_nodes<<endl
             <<"tree size: "<<b.nodes.size()<<endl
             <<"learn at leaf: "<<b.learn_at_leaf<<endl
-            <<"num_queries per example: "<<b.num_queries<<endl;
+            <<"num_queries per example: "<<b.num_queries<<endl
+            <<"num of dream operations per example: "<<b.dream_repeats<<endl
+            <<"bandit: "<<b.bandit<<endl;
     }
 
 
@@ -773,10 +778,9 @@ namespace memory_tree_ns
                 if (b.learn_at_leaf == true){
                     //cout<<"learn at leaf"<<endl;
                     float tmp_s = normalized_linear_prod(b, &ec, b.examples[loc]);
-                    //tmp_s = 0;
                     example* kprod_ec = &calloc_or_throw<example>();
                     diag_kronecker_product_test(ec, *b.examples[loc], *kprod_ec);
-                    kprod_ec->l.simple = {FLT_MAX, 1., tmp_s};
+                    kprod_ec->l.simple = {FLT_MAX, 0., tmp_s};
                     base.predict(*kprod_ec, b.max_routers);
                     //score = kprod_ec->pred.scalar;
                     score = kprod_ec->partial_prediction;
@@ -969,7 +973,7 @@ namespace memory_tree_ns
         float prediction = ec.pred.scalar;
         descent(b.nodes[cn], prediction); // faked descent
         if((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size()+2 < b.max_nodes))
-	        split_leaf_hal(b, base, cn);
+	        split_leaf(b, base, cn);
 
         //cerr << "insert_only=0 cn=" << cn << " deviated=" << deviated << " final_reward=" << final_reward << " closest_ec=" << closest_ec << endl;
         return final_reward;
@@ -1012,17 +1016,38 @@ namespace memory_tree_ns
             cn = prediction < 0 ? b.nodes[cn].left : b.nodes[cn].right;
         }
         //get to leaf now:
-        int64_t closest_ec = pick_nearest(b,base,cn, ec);  //location at b.examples.
-        float reward = 0.;
+	    int64_t closest_ec = 0;
+	    float prob_nearest = 0.95f;
+	    float weight = 0.f;
+	    if (b.learn_at_leaf == true){ //if we learn at leaf, then we need to make sure it visits negative examples as well.
+		    if (merand48(b.all->random_state) < prob_nearest){
+        	    closest_ec = pick_nearest(b,base,cn, ec);  //location at b.examples.
+			    weight = 1.f;
+		    }
+		    else{ //randomly sample an example in the leaf
+			    if (b.nodes[cn].examples_index.size() > 0){
+				    uint32_t pos = uint32_t(merand48(b.all->random_state) * b.nodes[cn].examples_index.size());
+				    closest_ec = b.nodes[cn].examples_index[pos];
+			    }
+			    else
+				    closest_ec = -1;
+			    weight = prob_nearest/(1.-prob_nearest);
+		    }
+	    }
+	    else //if no learn at leaf, then we just deterministically return using Euclidean distance.
+		    closest_ec = pick_nearest(b,base,cn, ec);
+
+        float reward = 0.f;
         if ((closest_ec != -1) && (b.examples[closest_ec]->l.multi.label == ec.l.multi.label))
-            reward = 1.;
+            reward = 1.f;
         b.total_num_queires ++;
 
-        if (b.learn_at_leaf == true){
-            //float score = normalized_linear_prod(b, &ec, b.examples[closest_ec]);
-            example* kprod_ec = &calloc_or_throw<example>();
-            diag_kronecker_product_test(ec, *b.examples[closest_ec], *kprod_ec);
-            kprod_ec->l.simple = {reward, 1.f, 0.f};
+        if (b.learn_at_leaf == true && closest_ec != -1){
+        	float score = normalized_linear_prod(b, &ec, b.examples[closest_ec]);
+        	example* kprod_ec = &calloc_or_throw<example>();
+        	diag_kronecker_product_test(ec, *b.examples[closest_ec], *kprod_ec);
+         	kprod_ec->l.simple = {reward, 1.f, -score};
+	    	kprod_ec->weight = weight;
             base.learn(*kprod_ec, b.max_routers);
             free_example(kprod_ec);
         }
@@ -1071,68 +1096,69 @@ namespace memory_tree_ns
 		}
 	}
 
-    void query_and_learn(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, const uint32_t& K)
-    {
+    //we roll in, then stop at a random step, do exploration. 
+    void single_query_and_learn(memory_tree& b, base_learner& base, const uint32_t& ec_array_index){
         v_array<uint32_t> path_to_leaf = v_init<uint32_t>();
 		example& ec = *b.examples[ec_array_index];
-		route_to_leaf(b, base, ec_array_index, 0, path_to_leaf, true);
+		route_to_leaf(b, base, ec_array_index, 0, path_to_leaf, false);
         uint32_t leaf_id = path_to_leaf[path_to_leaf.size()-1];
-        //cout<<"at query and learn 1: "<<path_to_leaf.size()<<endl;
 
         if (path_to_leaf.size() > 1){
-            float reward_from_path = query_reward(b, base, leaf_id, ec);
-
-            v_array<uint32_t> sample_pos = v_init<uint32_t>();
-            uint32_t query_times = (std::min) (uint32_t(path_to_leaf.size()-1), K);
-            //cout<<path_to_leaf.size()<<" "<<K<<" "<<query_times<<endl;
-            for (uint32_t i = 0; i < path_to_leaf.size() - 1; i++){ //go through the nodes in path, with probablity query_times/total_length, chose this node. hence, in average, we chose query_times nodes for explore
-                bool choosen = merand48(b.all->random_state) < (query_times*1.f /(path_to_leaf.size()*1.f - 1.f));
-                if (choosen)
-                    sample_pos.push_back(i);
-            }
-            //explore at each choosen node:
-            //cout<<"query times at this example: "<<sample_pos.size()<<endl;
-            //for (auto pos : sample_pos)
-            //    cout<<path_to_leaf[pos]<<" ";
-            //cout<<endl;
-
-            for (auto pos : sample_pos){
-                uint32_t cn = path_to_leaf[pos];
+            uint32_t random_pos = merand48(b.all->random_state)*(path_to_leaf.size()-1);
+            uint32_t cn = path_to_leaf[random_pos];
+            float objective = 0.f;
+            if (b.bandit == true){
                 base.predict(ec, b.nodes[cn].base_router);
-                float prediction = ec.pred.scalar;
-                float p_follow = (std::max)(0.f, (std::min)(1.f, 0.5f*(1.f+2.f*fabs(prediction)))); //prob of follow ranging from (0.5, 0.99)
-			    bool deviate = merand48(b.all->random_state) > p_follow;
-			    if (deviate) prediction = -prediction; //flip the sign of prediction is deviate is true
-                
-                float final_reward = 0.f;
-                if (deviate){
-                    uint32_t deviated_to_node_id = prediction < 0 ? b.nodes[cn].left : b.nodes[cn].right;
-                    v_array<uint32_t> deivated_path = v_init<uint32_t>();//query new path.
-				    route_to_leaf(b, base, ec_array_index, deviated_to_node_id, deivated_path, false);
-                    //cout<<"at query and learn 2: "<<deivated_path.size()<<endl;
-				    uint32_t deviated_leaf_id = deivated_path[deivated_path.size() - 1]; //get the leaf from the deviated path
-				    deivated_path.delete_v(); //free memory
-                    final_reward = query_reward(b, base, deviated_leaf_id, ec);  //query happens here
+                float curr_pred = ec.pred.scalar;
+                float prob_right = (std::max)(0.0f, (std::min) (1.f, 0.5f * (1.f + 2.f*curr_pred)));
+        
+		        float smooth_value = 1.f/pow(float(b.iter+1), 0.5f);
+	  	        prob_right = (1-smooth_value)*prob_right + smooth_value/2.f; //mixing
+                float coin = merand48(b.all->random_state) < prob_right ? 1.f : -1.f;
+            
+                if (coin == -1.f){ //go left
+                    float reward_left_subtree = return_reward_from_node(b,base, b.nodes[cn].left, ec);
+                    objective = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha*(-reward_left_subtree/(1.-prob_right))/2.;
                 }
-                else
-                    final_reward = reward_from_path;
-
-                float ips_reward = final_reward / (deviate ? (1. - p_follow) : p_follow); // IPS on the reward
-			    if (prediction < 0) ips_reward = -ips_reward;
-			    float objective = (1. - b.alpha) * log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha * ips_reward/2.;
-			    MULTICLASS::label_t mc = ec.l.multi;
-			    ec.l.simple = { objective < 0. ? -1.f : 1.f, fabs(objective) , 0. };
-                base.learn(ec, b.nodes[cn].base_router);
-                ec.l.multi = mc;
+                else{ //go right:
+                    float reward_right_subtree= return_reward_from_node(b,base, b.nodes[cn].right, ec);
+                    objective = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha*(reward_right_subtree/prob_right)/2.;
+                }
             }
-            sample_pos.delete_v();
+            else{ //full information setting, we try both actions:
+                float reward_left_subtree = return_reward_from_node(b,base, b.nodes[cn].left, ec);
+                float reward_right_subtree= return_reward_from_node(b,base, b.nodes[cn].right, ec);
+                objective = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha*(reward_right_subtree-reward_left_subtree);
+            }
+            //learn:
+            float ec_input_weight = ec.weight;
+            MULTICLASS::label_t mc = ec.l.multi;
+            ec.weight = fabs(objective);
+            if (ec.weight >= 100.f) //crop the weight, otherwise sometimes cause NAN outputs.
+                ec.weight = 100.f;
+            else if (ec.weight < .01f)
+                ec.weight = 0.01f;
+            ec.l.simple = {objective < 0. ? -1.f : 1.f, 1.f, 0.};
+            base.learn(ec, b.nodes[cn].base_router);
+            ec.l.multi = mc;
+            ec.weight = ec_input_weight; //restore the original weight
         }
-        //once we finish updating, we officially insert the example to the memory. 
-        //route_to_leaf(b, base, ec_array_index, 0, path_to_leaf, true); //insert
         path_to_leaf.delete_v();
     }
 
-    void insert_example_without_ips(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, bool insert_only)
+    void multiple_query_learn_and_final_insert(memory_tree& b, base_learner& base, const uint32_t& ec_array_index){
+        //overall, we want to make sure that for bandit or non-bandit, the total number of reward signal queries are the same. 
+        uint32_t allowed_trials = b.bandit ? b.num_queries : uint32_t((std::max)(1.f, b.num_queries/2.f));
+        for (uint32_t i = 0; i < allowed_trials; i++)
+            single_query_and_learn(b, base, ec_array_index);
+        
+        //after learn num_queries times, we finally insert the example:
+        v_array<uint32_t> path_to_leaf = v_init<uint32_t>();
+		route_to_leaf(b, base, ec_array_index, 0, path_to_leaf, true);
+        path_to_leaf.delete_v();
+    }
+
+    void insert_example_without_ips(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, bool insert)
     {
         example& ec = *b.examples[ec_array_index];
         uint32_t cn = 0;
@@ -1140,7 +1166,6 @@ namespace memory_tree_ns
         while(b.nodes[cn].internal != -1) //internal nodes
         {
             float prediction = 0.;
-            //if (!insert_only) //do train the node first: 
             bool train_flag = (merand48(b.all->random_state) <= (b.num_queries*1.f/(b.max_depth*1.f)));
             //cout<<b.num_queries<<" "<<" "<<b.max_depth<<" "<<train_flag<<endl;
             if (train_flag == true){
@@ -1149,7 +1174,9 @@ namespace memory_tree_ns
                 base.predict(ec, b.nodes[cn].base_router);
                 float curr_pred = ec.pred.scalar;
                 float prob_right = (std::max)(0.0f, (std::min) (1.f, 0.5f * (1.f + 2.f*curr_pred)));
-                prob_right = 0.9f*prob_right + 0.1f/2.f;
+          	
+		        float smooth_value = 1.f/pow(float(b.iter+1), 0.5f);
+	  	        prob_right = (1-smooth_value)*prob_right + smooth_value/2.f;
                 float coin = merand48(b.all->random_state) < prob_right ? 1.f : -1.f;
                 
                 float objective = 0.f;
@@ -1184,20 +1211,18 @@ namespace memory_tree_ns
         }
         //now we get to leaf: we only train the leaf predictor at the phase of insertion.
         //we only split the node at the phase of insertion. (we do not need to split leaf at learn phase, as there won't be any new insertion.)
-        if (insert_only == true){
+        if (insert == true){
             b.nodes[cn].examples_index.push_back(ec_array_index); //insert to the leaf.
-            //if (b.learn_at_leaf == true)
-            //    learn_similarity_at_leaf(b,base,cn, ec);      
             if ((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size() + 2 < b.max_nodes))
-                split_leaf_hal(b,base,cn);
+                split_leaf(b,base,cn);
         }
     }
 
     void insert_example_hal(memory_tree& b, base_learner& base, const uint32_t& ec_array_index) 
     {
-        //insert_example_hal_helper(b, base, ec_array_index, 0, false, true); // insert only
-        insert_example_without_ips(b, base, ec_array_index, true);
-        //query_and_learn(b, base, ec_array_index, b.num_queries);
+        //insert_example_without_ips(b, base, ec_array_index, true);
+        multiple_query_learn_and_final_insert(b, base, ec_array_index);
+
         
         //float final_reward = insert_example_hal_helper(b, base, ec_array_index, 0, false, false); // learn
         //insert_example_without_ips(b, base, ec_array_index, false);
@@ -1306,7 +1331,7 @@ namespace memory_tree_ns
                 b.examples.pop();
             }
             //if (b.iter % 1 == 0)
-            for (int i = 0; i < 1; i++)
+            for (uint32_t i = 0; i < b.dream_repeats; i++)
                 experience_replay(b, base);
             b.construct_time = double(clock() - begin)/CLOCKS_PER_SEC;   
         }
@@ -1497,6 +1522,8 @@ base_learner* memory_tree_setup(vw& all)
       ("hal_version", po::value<bool>()->default_value(false), "use reward based optimization")
       ("learn_at_leaf", po::value<bool>()->default_value(true), "whether or not learn at leaf (defualt = True)")
       ("num_queries", po::value<uint32_t>()->default_value(1.), "number of returned queries per example (<= log nodes")
+      ("dream_repeats", po::value<uint32_t>()->default_value(1.), "number of dream operations per example (default = 1)")
+      ("bandit", po::value<bool>()-> default_value(false), "whether or not use bandit information in training node (default = false)")
       ("Alpha", po::value<float>()->default_value(0.1), "Alpha");
      add_options(all);
 
@@ -1522,6 +1549,17 @@ base_learner* memory_tree_setup(vw& all)
 	tree.alpha = vm["Alpha"].as<float>();
 	*all.file_options << " --Alpha " << tree.alpha;
       }
+
+    if (vm.count("dream_repeats")){
+        tree.dream_repeats = vm["dream_repeats"].as<uint32_t>();
+        *all.file_options << " --dream_repeats "<< vm["dream_repeats"].as<uint32_t>();
+    }
+
+    if (vm.count("bandit")){
+        tree.bandit = vm["bandit"].as<bool>();
+        *all.file_options << " --bandit "<<tree.bandit;
+    }
+
     if (vm.count("hal_version"))
       {
 	tree.hal_version =  vm["hal_version"].as<bool>();  //vm.count("hal_version") > 0;
