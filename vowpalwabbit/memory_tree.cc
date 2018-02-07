@@ -1130,10 +1130,10 @@ namespace memory_tree_ns
             float ec_input_weight = ec.weight;
             MULTICLASS::label_t mc = ec.l.multi;
             ec.weight = fabs(objective);
-            if (ec.weight >= 1.f) //crop the weight, otherwise sometimes cause NAN outputs.
-                ec.weight = 1.f;
-            else if (ec.weight < 1.f)
-                ec.weight = 1.f;
+            if (ec.weight >= 100.f) //crop the weight, otherwise sometimes cause NAN outputs.
+                ec.weight = 100.f;
+            else if (ec.weight < .001f)
+                ec.weight = 0.001f;
             ec.l.simple = {objective < 0. ? -1.f : 1.f, 1.f, 0.};
             base.learn(ec, b.nodes[cn].base_router);
             ec.l.multi = mc;
@@ -1150,11 +1150,11 @@ namespace memory_tree_ns
             single_query_and_learn(b, base, ec_array_index, ec);
         
         //after learn num_queries times, we finally insert the example, if we still at the first pass
-        if (b.current_pass < 1){
-            v_array<uint32_t> path_to_leaf = v_init<uint32_t>();
-		    route_to_leaf(b, base, ec_array_index, 0, path_to_leaf, true); //insertion happens in this call.
-            path_to_leaf.delete_v();
-        }
+        //if (b.current_pass == 0){
+        //    v_array<uint32_t> path_to_leaf = v_init<uint32_t>();
+		//    route_to_leaf(b, base, ec_array_index, 0, path_to_leaf, true); //insertion happens in this call.
+        //    path_to_leaf.delete_v();
+        //}
     }
 
     void insert_example_without_ips(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, bool insert)
@@ -1287,7 +1287,7 @@ namespace memory_tree_ns
             
             if (b.current_pass == 0)
                 insert_example(b, base, ec_id); //unsupervised learning
-            else if (b.current_pass >= 1){
+            else{
                 v_array<uint32_t> tmp_path = v_init<uint32_t>();
                 route_to_leaf(b, base, ec_id, 0, tmp_path, true); //no learn, just re-route to adjust the position of the sampled example.
                 tmp_path.delete_v();
@@ -1314,17 +1314,19 @@ namespace memory_tree_ns
 	            cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<", total num queires so far: "<<b.total_num_queires<<", max depth: "<<b.max_depth<<", max exp in leaf: "<<b.max_ex_in_leaf<<endl;
 
             clock_t begin = clock();
-            example* new_ec = &calloc_or_throw<example>();
-            copy_example_data(new_ec, &ec);
-            remove_repeat_features_in_ec(*new_ec); ////sort unique.
-            
+        
             if (b.current_pass == 0){ //in the first pass, we need to store the memory:
+                example* new_ec = &calloc_or_throw<example>();
+                copy_example_data(new_ec, &ec);
+                remove_repeat_features_in_ec(*new_ec); ////sort unique.
                 b.examples.push_back(new_ec);   
-	            //insert_example_hal(b, base, b.examples.size()-1, *new_ec);
                 insert_example(b, base, b.examples.size() - 1); //unsupervised learning. 
+                for (uint32_t i = 0; i < b.dream_repeats; i++)
+                    experience_replay(b, base);
             }
-            else if (b.current_pass >= 1){ //starting from the current pass, we just learn using reinforcement signal, no insertion needed:
-                insert_example_hal(b, base, 0, *new_ec); //no insertion will happen in this call
+            else{ //starting from the current pass, we just learn using reinforcement signal, no insertion needed:
+                size_t ec_id = (b.iter)%b.examples.size();
+                insert_example_hal(b, base, ec_id, *b.examples[ec_id]); //no insertion will happen in this call
             }
             //if (b.hal_version){
 		    //    insert_example_hal(b, base, b.examples.size()-1);
@@ -1333,9 +1335,7 @@ namespace memory_tree_ns
 		    //    insert_example(b, base, b.examples.size()-1);
 	        //}
             
-            //replay operates here: 
-            for (uint32_t i = 0; i < b.dream_repeats; i++)
-                experience_replay(b, base);
+
             b.construct_time = double(clock() - begin)/CLOCKS_PER_SEC;   
         }
         else if (b.test_mode == true){
