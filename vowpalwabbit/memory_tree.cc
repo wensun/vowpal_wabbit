@@ -452,6 +452,9 @@ namespace memory_tree_ns
 
         bool test_mode;
 
+        size_t current_pass;
+        size_t final_pass;
+
         memory_tree()
         {
             nodes = v_init<node>();
@@ -542,7 +545,8 @@ namespace memory_tree_ns
             <<"learn at leaf: "<<b.learn_at_leaf<<endl
             <<"num_queries per example: "<<b.num_queries<<endl
             <<"num of dream operations per example: "<<b.dream_repeats<<endl
-            <<"bandit: "<<b.bandit<<endl;
+            <<"bandit: "<<b.bandit<<endl
+            <<"current_pass: "<<b.current_pass<<endl;
     }
 
 
@@ -550,13 +554,11 @@ namespace memory_tree_ns
     inline uint32_t descent(node& n, const float prediction)
     { 
         //prediction <0 go left, otherwise go right
-        if(prediction < 0)
-        {
+        if(prediction < 0){
             n.nl++; //increment the number of examples routed to the left.
             return n.left;
         }
-        else //otherwise go right.
-        {
+        else{ //otherwise go right.
             n.nr++; //increment the number of examples routed to the right.
             return n.right; 
         }
@@ -760,9 +762,6 @@ namespace memory_tree_ns
             return 0;
     }
 
-
-
-
     //pick up the "closest" example in the leaf using the score function.
     int64_t pick_nearest(memory_tree& b, base_learner& base, const uint32_t cn, example& ec)
     {
@@ -890,7 +889,6 @@ namespace memory_tree_ns
             //cout<<"max example in leaf now: "<<b.max_ex_in_leaf<<endl;
         }
     }
-
 
     void predict(memory_tree& b, base_learner& base, example& test_ec)
     {
@@ -1096,12 +1094,10 @@ namespace memory_tree_ns
 		}
 	}
 
-    //we roll in, then stop at a random step, do exploration. 
-    void single_query_and_learn(memory_tree& b, base_learner& base, const uint32_t& ec_array_index){
+    //we roll in, then stop at a random step, do exploration. //no real insertion happens in the function.
+    void single_query_and_learn(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, example& ec){
         v_array<uint32_t> path_to_leaf = v_init<uint32_t>();
-		example& ec = *b.examples[ec_array_index];
-		route_to_leaf(b, base, ec_array_index, 0, path_to_leaf, false);
-        uint32_t leaf_id = path_to_leaf[path_to_leaf.size()-1];
+		route_to_leaf(b, base, ec_array_index, 0, path_to_leaf, false); //no insertion happens here.
 
         if (path_to_leaf.size() > 1){
             uint32_t random_pos = merand48(b.all->random_state)*(path_to_leaf.size()-1);
@@ -1134,10 +1130,10 @@ namespace memory_tree_ns
             float ec_input_weight = ec.weight;
             MULTICLASS::label_t mc = ec.l.multi;
             ec.weight = fabs(objective);
-            if (ec.weight >= 100.f) //crop the weight, otherwise sometimes cause NAN outputs.
-                ec.weight = 100.f;
-            else if (ec.weight < .01f)
-                ec.weight = 0.01f;
+            if (ec.weight >= 1.f) //crop the weight, otherwise sometimes cause NAN outputs.
+                ec.weight = 1.f;
+            else if (ec.weight < 1.f)
+                ec.weight = 1.f;
             ec.l.simple = {objective < 0. ? -1.f : 1.f, 1.f, 0.};
             base.learn(ec, b.nodes[cn].base_router);
             ec.l.multi = mc;
@@ -1146,16 +1142,19 @@ namespace memory_tree_ns
         path_to_leaf.delete_v();
     }
 
-    void multiple_query_learn_and_final_insert(memory_tree& b, base_learner& base, const uint32_t& ec_array_index){
+    void multiple_query_learn_and_final_insert(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, example& ec){
         //overall, we want to make sure that for bandit or non-bandit, the total number of reward signal queries are the same. 
         uint32_t allowed_trials = b.bandit ? b.num_queries : uint32_t((std::max)(1.f, b.num_queries/2.f));
+        //do allowed_trials number of learning.
         for (uint32_t i = 0; i < allowed_trials; i++)
-            single_query_and_learn(b, base, ec_array_index);
+            single_query_and_learn(b, base, ec_array_index, ec);
         
-        //after learn num_queries times, we finally insert the example:
-        v_array<uint32_t> path_to_leaf = v_init<uint32_t>();
-		route_to_leaf(b, base, ec_array_index, 0, path_to_leaf, true);
-        path_to_leaf.delete_v();
+        //after learn num_queries times, we finally insert the example, if we still at the first pass
+        if (b.current_pass < 1){
+            v_array<uint32_t> path_to_leaf = v_init<uint32_t>();
+		    route_to_leaf(b, base, ec_array_index, 0, path_to_leaf, true); //insertion happens in this call.
+            path_to_leaf.delete_v();
+        }
     }
 
     void insert_example_without_ips(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, bool insert)
@@ -1218,12 +1217,11 @@ namespace memory_tree_ns
         }
     }
 
-    void insert_example_hal(memory_tree& b, base_learner& base, const uint32_t& ec_array_index) 
+    void insert_example_hal(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, example& ec) 
     {
         //insert_example_without_ips(b, base, ec_array_index, true);
-        multiple_query_learn_and_final_insert(b, base, ec_array_index);
+        multiple_query_learn_and_final_insert(b, base, ec_array_index, ec);
 
-        
         //float final_reward = insert_example_hal_helper(b, base, ec_array_index, 0, false, false); // learn
         //insert_example_without_ips(b, base, ec_array_index, false);
         //b.cumulative_reward += final_reward;
@@ -1287,13 +1285,20 @@ namespace memory_tree_ns
             //float final_reward = insert_example_hal_helper(b, base, ec_id, 0, false, false); // learn
             //insert_example_without_ips(b, base, ec_id, true);
             
-            if (b.hal_version == true){
+            if (b.current_pass == 0)
+                insert_example(b, base, ec_id); //unsupervised learning
+            else if (b.current_pass >= 1){
                 v_array<uint32_t> tmp_path = v_init<uint32_t>();
-                route_to_leaf(b, base, ec_id, 0, tmp_path, true);
+                route_to_leaf(b, base, ec_id, 0, tmp_path, true); //no learn, just re-route to adjust the position of the sampled example.
                 tmp_path.delete_v();
             }
-            else
-                insert_example(b, base, ec_id); 
+            //if (b.hal_version == true){
+            //    v_array<uint32_t> tmp_path = v_init<uint32_t>();
+            //    route_to_leaf(b, base, ec_id, 0, tmp_path, true);
+            //    tmp_path.delete_v();
+           //}
+            //else
+            //    insert_example(b, base, ec_id); 
         }
 
     }
@@ -1312,25 +1317,23 @@ namespace memory_tree_ns
             example* new_ec = &calloc_or_throw<example>();
             copy_example_data(new_ec, &ec);
             remove_repeat_features_in_ec(*new_ec); ////sort unique.
-            b.examples.push_back(new_ec);   
-            b.num_ecs++; 
-
-            float random_prob = merand48(b.all->random_state);
-            if (random_prob < 1.) {
-	            if (b.hal_version){
-		            insert_example_hal(b, base, b.examples.size()-1);
-                }
-	        else
-		        insert_example(b, base, b.examples.size()-1);
-	        }
-            else{
-	            if (b.hal_version) cerr << "eeeeeek!" << endl;
-                insert_example(b, base, b.examples.size()-1, true);
-                b.num_ecs--;
-                free_example(new_ec);
-                b.examples.pop();
+            
+            if (b.current_pass == 0){ //in the first pass, we need to store the memory:
+                b.examples.push_back(new_ec);   
+	            //insert_example_hal(b, base, b.examples.size()-1, *new_ec);
+                insert_example(b, base, b.examples.size() - 1); //unsupervised learning. 
             }
-            //if (b.iter % 1 == 0)
+            else if (b.current_pass >= 1){ //starting from the current pass, we just learn using reinforcement signal, no insertion needed:
+                insert_example_hal(b, base, 0, *new_ec); //no insertion will happen in this call
+            }
+            //if (b.hal_version){
+		    //    insert_example_hal(b, base, b.examples.size()-1);
+            //}
+	        //else
+		    //    insert_example(b, base, b.examples.size()-1);
+	        //}
+            
+            //replay operates here: 
             for (uint32_t i = 0; i < b.dream_repeats; i++)
                 experience_replay(b, base);
             b.construct_time = double(clock() - begin)/CLOCKS_PER_SEC;   
@@ -1346,6 +1349,11 @@ namespace memory_tree_ns
 
     } 
 
+
+    void end_pass(memory_tree& b){
+        b.current_pass ++;
+        cout<<"######### Current Pass: "<<b.current_pass<<", with number of memories strored so far: "<<b.examples.size()<<endl;
+    }
 
     void finish(memory_tree& b)
     {
@@ -1532,6 +1540,8 @@ base_learner* memory_tree_setup(vw& all)
     tree.all = &all;
     tree.max_nodes = vm["memory_tree"].as<uint32_t>();
     tree.learn_at_leaf = vm["learn_at_leaf"].as<bool>();
+    tree.current_pass = 0;
+    tree.final_pass = all.numpasses;
 
     if (vm.count("leaf_example_multiplier"))
       {
@@ -1586,6 +1596,7 @@ base_learner* memory_tree_setup(vw& all)
     
     //srand(time(0));
     l.set_save_load(save_load_memory_tree);
+    l.set_end_pass(end_pass);
     l.set_finish(finish);
 
     return make_base (l);
