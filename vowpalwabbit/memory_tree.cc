@@ -455,6 +455,8 @@ namespace memory_tree_ns
         size_t current_pass;
         size_t final_pass;
 
+        int top_K;
+
         memory_tree()
         {
             nodes = v_init<node>();
@@ -471,6 +473,7 @@ namespace memory_tree_ns
             max_ex_in_leaf = 0;
             construct_time = 0;
             test_time = 0;
+            top_K = 1;
         }
     };
 
@@ -546,7 +549,8 @@ namespace memory_tree_ns
             <<"num_queries per example: "<<b.num_queries<<endl
             <<"num of dream operations per example: "<<b.dream_repeats<<endl
             <<"bandit: "<<b.bandit<<endl
-            <<"current_pass: "<<b.current_pass<<endl;
+            <<"current_pass: "<<b.current_pass<<endl
+            <<"top_K: "<<b.top_K<<endl;
     }
 
 
@@ -716,6 +720,7 @@ namespace memory_tree_ns
         }
     }
 
+    /*
     uint32_t majority_vote(memory_tree& b, base_learner& base, const uint32_t cn, example& ec)
     {
         if(b.nodes[cn].examples_index.size() > 0){
@@ -739,7 +744,7 @@ namespace memory_tree_ns
                 bool in = false;
                 for (score_label& s_l : score_labs){
                     if (s_l.label == b.examples[loc]->l.multi.label ){
-                        s_l.score += exp(50.*(score));
+                        s_l.score; 
                         in = true;
                         break;
                     }
@@ -760,8 +765,68 @@ namespace memory_tree_ns
         }
         else
             return 0;
+    }*/
+
+
+    int32_t arg_max_on_varray(const v_array<float>& scores){
+        if (scores.size() == 0)
+            return -1;
+
+        float max_score = scores[0]; //score is bonded in [-1,1]
+        int32_t max_score_pos = 0;
+        for (size_t i = 1; i < scores.size(); i++){
+            if (scores[i] >= max_score){
+                max_score = scores[i];
+                max_score_pos = i;
+            }
+        }
+        return max_score_pos;
     }
 
+    void pick_top_k(memory_tree& b, base_learner& base, const uint32_t cn, example& ec, v_array<int32_t>& top_k_ec_pos_examples){
+        top_k_ec_pos_examples.erase();
+        if (b.nodes[cn].examples_index.size() > 0){
+            v_array<float> scores = v_init<float>();
+            for (size_t i = 0; i < b.nodes[cn].examples_index.size(); i++){
+                float score = 0.f;
+                uint32_t loc_at_examples = b.nodes[cn].examples_index[i];
+                if (b.learn_at_leaf == true){
+                    //cout<<"learn at leaf"<<endl;
+                    float tmps = normalized_linear_prod(b, &ec, b.examples[loc_at_examples]);
+                    example* kprod_ec = &calloc_or_throw<example>();
+                    diag_kronecker_product_test(ec, *b.examples[loc_at_examples], *kprod_ec);
+                    kprod_ec->l.simple = {FLT_MAX, 1.f, tmps};
+                    base.predict(*kprod_ec, b.max_routers);
+                    score = kprod_ec->partial_prediction;
+                    free_example(kprod_ec);
+                }
+                else
+                    score = normalized_linear_prod(b, &ec, b.examples[loc_at_examples]);
+                scores.push_back(score);
+            }
+            //choose top k highest scores: 
+            for (int i = 0; i < (std::min)(b.top_K, int(scores.size())); i++){
+                int32_t argmax = arg_max_on_varray(scores);
+                top_k_ec_pos_examples.push_back(b.nodes[cn].examples_index[argmax]);
+                scores[argmax] = -FLT_MAX;
+            }
+        }
+
+        if (b.learn_at_leaf == true && top_k_ec_pos_examples.size() > 0 && b.test_mode == false){
+            //update the leaf predictor:
+            for (int32_t pos : top_k_ec_pos_examples){
+                float reward = (ec.l.multi.label == b.examples[pos]->l.multi.label)? 1.f:0.f;
+                float score = normalized_linear_prod(b, &ec, b.examples[pos]);
+                example* kprod_ec = &calloc_or_throw<example>();
+                diag_kronecker_product_test(ec, *b.examples[pos], *kprod_ec);
+                kprod_ec->l.simple = {reward, 1.f, -score};
+                base.learn(*kprod_ec, b.max_routers);
+                free_example(kprod_ec);
+            }
+        }
+    }
+
+    
     //pick up the "closest" example in the leaf using the score function.
     int64_t pick_nearest(memory_tree& b, base_learner& base, const uint32_t cn, example& ec)
     {
@@ -901,34 +966,34 @@ namespace memory_tree_ns
         uint32_t save_multi_pred = ec.pred.multiclass;
         uint32_t cn = 0;
         ec.l.simple = {-1.f, 1.f, 0.};
-        while(b.nodes[cn].internal == 1) //if it's internal
-        {
+        while(b.nodes[cn].internal == 1){ //if it's internal{
             //cout<<"at node "<<cn<<endl;
             base.predict(ec, b.nodes[cn].base_router);
             uint32_t newcn = ec.pred.scalar < 0 ? b.nodes[cn].left : b.nodes[cn].right; //do not need to increment nl and nr.
             cn = newcn;
         }
-         
         ec.l.multi = mc; 
         ec.pred.multiclass = save_multi_pred;
 
-        
-        /*
-        uint32_t label = majority_vote(b, base, cn, ec);
-        if (label != 0)
-        {
-            ec.pred.multiclass = label;
-            test_ec.pred.multiclass = label;
-            if(test_ec.pred.multiclass != test_ec.l.multi.label){
-                test_ec.loss = test_ec.weight; //weight in default is 1.
-                b.num_mistakes++;
+        v_array<int32_t> top_k_ec_pos_examples = v_init<int32_t>();
+        pick_top_k(b, base, cn, ec, top_k_ec_pos_examples);
+        bool flag_in_top_k = false;
+        if (top_k_ec_pos_examples.size() > 0){
+            for (int32_t ec_pos : top_k_ec_pos_examples){
+                if (test_ec.l.multi.label == b.examples[ec_pos]->l.multi.label){
+                    flag_in_top_k = true;
+                    break;    
+                }
             }
         }
+        if (flag_in_top_k == true)
+            test_ec.pred.multiclass = test_ec.l.multi.label;
         else{
             test_ec.loss = test_ec.weight;
             b.num_mistakes++;
-        }*/
+        }
 
+        /*
         int64_t closest_ec = pick_nearest(b, base, cn, ec);
         if (closest_ec != -1){
             ec.pred.multiclass = b.examples[closest_ec]->l.multi.label;
@@ -942,8 +1007,7 @@ namespace memory_tree_ns
         else{
             test_ec.loss = test_ec.weight;
             b.num_mistakes++;
-        }
-
+        }*/
         free_example(&ec);
     }
 
@@ -1300,7 +1364,7 @@ namespace memory_tree_ns
             //else
             //    insert_example(b, base, ec_id); 
         }
-
+ 
     }
 
     //learn: descent the example from the root while generating binary training
@@ -1311,7 +1375,7 @@ namespace memory_tree_ns
             b.iter++;
             predict(b, base, ec);
             if (b.iter%5000 == 0)
-	            cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<", total num queires so far: "<<b.total_num_queires<<", max depth: "<<b.max_depth<<", max exp in leaf: "<<b.max_ex_in_leaf<<endl;
+	            cout<<"at iter "<<b.iter<<", top("<<b.top_K<<") pred error: "<<b.num_mistakes*1./b.iter<<", total num queires so far: "<<b.total_num_queires<<", max depth: "<<b.max_depth<<", max exp in leaf: "<<b.max_ex_in_leaf<<endl;
 
             clock_t begin = clock();
         
@@ -1321,13 +1385,13 @@ namespace memory_tree_ns
                 remove_repeat_features_in_ec(*new_ec); ////sort unique.
                 b.examples.push_back(new_ec);   
                 insert_example(b, base, b.examples.size() - 1); //unsupervised learning. 
-                for (uint32_t i = 0; i < b.dream_repeats; i++)
-                    experience_replay(b, base);
             }
             else{ //starting from the current pass, we just learn using reinforcement signal, no insertion needed:
                 size_t ec_id = (b.iter)%b.examples.size();
                 insert_example_hal(b, base, ec_id, *b.examples[ec_id]); //no insertion will happen in this call
             }
+            for (uint32_t i = 0; i < b.dream_repeats; i++)
+                experience_replay(b, base);
             //if (b.hal_version){
 		    //    insert_example_hal(b, base, b.examples.size()-1);
             //}
@@ -1532,6 +1596,7 @@ base_learner* memory_tree_setup(vw& all)
       ("num_queries", po::value<uint32_t>()->default_value(1.), "number of returned queries per example (<= log nodes")
       ("dream_repeats", po::value<uint32_t>()->default_value(1.), "number of dream operations per example (default = 1)")
       ("bandit", po::value<bool>()-> default_value(false), "whether or not use bandit information in training node (default = false)")
+      ("top_K", po::value<int>()->default_value(1), "top K prediction error (default 1)")
       ("Alpha", po::value<float>()->default_value(0.1), "Alpha");
      add_options(all);
 
@@ -1568,6 +1633,11 @@ base_learner* memory_tree_setup(vw& all)
     if (vm.count("bandit")){
         tree.bandit = vm["bandit"].as<bool>();
         *all.file_options << " --bandit "<<tree.bandit;
+    }
+
+    if (vm.count("top_K")){
+        tree.top_K = vm["top_K"].as<int>();
+        *all.file_options << " --top_K "<<tree.top_K;
     }
 
     if (vm.count("hal_version"))
