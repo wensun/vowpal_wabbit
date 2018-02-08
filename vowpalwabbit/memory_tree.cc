@@ -1168,12 +1168,13 @@ namespace memory_tree_ns
             uint32_t cn = path_to_leaf[random_pos];
             float objective = 0.f;
             if (b.bandit == true){
-                base.predict(ec, b.nodes[cn].base_router);
-                float curr_pred = ec.pred.scalar;
-                float prob_right = (std::max)(0.0f, (std::min) (1.f, 0.5f * (1.f + 2.f*curr_pred)));
-        
-		        float smooth_value = 1.f/pow(float(b.iter+1), 0.5f);
-	  	        prob_right = (1-smooth_value)*prob_right + smooth_value/2.f; //mixing
+                //base.predict(ec, b.nodes[cn].base_router);
+                //float curr_pred = ec.pred.scalar;
+                //float prob_right = (std::max)(0.0f, (std::min) (1.f, 0.5f * (1.f + 2.f*curr_pred)));
+		        //float smooth_value = 1.f/pow(float(b.iter+1), 0.5f);
+	  	        //prob_right = (1-smooth_value)*prob_right + smooth_value/2.f; //mixing
+                
+                float prob_right = 0.5;
                 float coin = merand48(b.all->random_state) < prob_right ? 1.f : -1.f;
             
                 if (coin == -1.f){ //go left
@@ -1349,13 +1350,13 @@ namespace memory_tree_ns
             //float final_reward = insert_example_hal_helper(b, base, ec_id, 0, false, false); // learn
             //insert_example_without_ips(b, base, ec_id, true);
             
-            if (b.current_pass == 0)
-                insert_example(b, base, ec_id); //unsupervised learning
-            else{
-                v_array<uint32_t> tmp_path = v_init<uint32_t>();
-                route_to_leaf(b, base, ec_id, 0, tmp_path, true); //no learn, just re-route to adjust the position of the sampled example.
-                tmp_path.delete_v();
-            }
+            //if (b.current_pass == 0)
+            insert_example(b, base, ec_id); //unsupervised learning
+            //else{
+            //    v_array<uint32_t> tmp_path = v_init<uint32_t>();
+            //    route_to_leaf(b, base, ec_id, 0, tmp_path, true); //no learn, just re-route to adjust the position of the sampled example.
+            //    tmp_path.delete_v();
+            //}
             //if (b.hal_version == true){
             //    v_array<uint32_t> tmp_path = v_init<uint32_t>();
             //    route_to_leaf(b, base, ec_id, 0, tmp_path, true);
@@ -1379,19 +1380,19 @@ namespace memory_tree_ns
 
             clock_t begin = clock();
         
-            if (b.current_pass == 0){ //in the first pass, we need to store the memory:
+            if (b.current_pass < 1){ //in the first pass, we need to store the memory:
                 example* new_ec = &calloc_or_throw<example>();
                 copy_example_data(new_ec, &ec);
                 remove_repeat_features_in_ec(*new_ec); ////sort unique.
                 b.examples.push_back(new_ec);   
                 insert_example(b, base, b.examples.size() - 1); //unsupervised learning. 
+                for (uint32_t i = 0; i < b.dream_repeats; i++)
+                    experience_replay(b, base);
             }
             else{ //starting from the current pass, we just learn using reinforcement signal, no insertion needed:
                 size_t ec_id = (b.iter)%b.examples.size();
                 insert_example_hal(b, base, ec_id, *b.examples[ec_id]); //no insertion will happen in this call
             }
-            for (uint32_t i = 0; i < b.dream_repeats; i++)
-                experience_replay(b, base);
             //if (b.hal_version){
 		    //    insert_example_hal(b, base, b.examples.size()-1);
             //}
