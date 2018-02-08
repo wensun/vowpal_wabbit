@@ -1350,13 +1350,13 @@ namespace memory_tree_ns
             //float final_reward = insert_example_hal_helper(b, base, ec_id, 0, false, false); // learn
             //insert_example_without_ips(b, base, ec_id, true);
             
-            //if (b.current_pass == 0)
-            insert_example(b, base, ec_id); //unsupervised learning
-            //else{
-            //    v_array<uint32_t> tmp_path = v_init<uint32_t>();
-            //    route_to_leaf(b, base, ec_id, 0, tmp_path, true); //no learn, just re-route to adjust the position of the sampled example.
-            //    tmp_path.delete_v();
-            //}
+            if (b.current_pass == 0)
+            	insert_example(b, base, ec_id); //unsupervised learning
+            else{
+                v_array<uint32_t> tmp_path = v_init<uint32_t>();
+                route_to_leaf(b, base, ec_id, 0, tmp_path, true); //no learn, just re-route to adjust the position of the sampled example.
+                tmp_path.delete_v();
+            }
             //if (b.hal_version == true){
             //    v_array<uint32_t> tmp_path = v_init<uint32_t>();
             //    route_to_leaf(b, base, ec_id, 0, tmp_path, true);
@@ -1392,6 +1392,8 @@ namespace memory_tree_ns
             else{ //starting from the current pass, we just learn using reinforcement signal, no insertion needed:
                 size_t ec_id = (b.iter)%b.examples.size();
                 insert_example_hal(b, base, ec_id, *b.examples[ec_id]); //no insertion will happen in this call
+		for (uint32_t i = 0; i < b.dream_repeats; i++)
+		    experience_replay(b, base);
             }
             //if (b.hal_version){
 		    //    insert_example_hal(b, base, b.examples.size()-1);

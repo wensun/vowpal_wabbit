@@ -3,17 +3,22 @@ import time
 import numpy as np
 
 available_shots = {"five":5, "three":3}
-available_shots = {"one":1}
+available_shots = {"five":5}
 
 for key in available_shots.iterkeys():
     shots = available_shots[key]
     num_of_classes = 20000
-    leaf_example_multiplier = 2#2#10
+    leaf_example_multiplier = 4#2#10
     lr = 0.1
     bits = 30
-    passes = 3
-    learn_at_leaf = 0 # 0
+    passes = 2
+    learn_at_leaf = 1 # 0
     hal_version = 1
+    bandit = 1
+    top_K = 1
+    dream_repeats = 3
+    num_queries = 1
+    alpha = 0.1
     loss = "squared"#"logistic"
 
     tree_node = int(passes*(num_of_classes*shots/(np.log(num_of_classes*shots)/np.log(2)*leaf_example_multiplier)));
@@ -29,8 +34,14 @@ for key in available_shots.iterkeys():
 
     print "## Training.."
     start = time.time()
-    os.system(".././vw --memory_tree {} --learn_at_leaf {} --hal_version {} --leaf_example_multiplier {} --loss_function {}  -l {} -b {} -c --passes {} --holdout_off {} -f {}".format(
-                tree_node, learn_at_leaf, hal_version, leaf_example_multiplier, loss, lr, bits, passes, train_data, saved_model))
+    os.system(".././vw --memory_tree {} --learn_at_leaf {} --hal_version {} --bandit {} --top_K {}\
+              --leaf_example_multiplier {} --dream_repeats {} --num_queries {}\
+              --Alpha {} --loss_function {}  -l {} -b {} -c --passes {} \
+              --holdout_off {} -f {}".format(
+                tree_node, learn_at_leaf, hal_version, bandit, top_K,
+                  leaf_example_multiplier, dream_repeats, num_queries,
+                  alpha, loss, lr, bits, passes,
+                  train_data, saved_model))
     train_time = time.time() - start
 
     #test:
