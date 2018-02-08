@@ -773,6 +773,51 @@ namespace memory_tree_ns
         free_example(&ec);
     }
 
+
+    float return_reward_from_node(memory_tree& b, base_learner& base, uint32_t cn, example& ec){
+    	while(b.nodes[cn].internal != -1){
+		base.predict(ec, b.nodes[cn].base_router);
+		float prediction = ec.pred.scalar;
+		cn = prediction < 0 ? b.nodes[cn].left : b.nodes[cn].right;
+	}
+	int64_t closest_ec = 0;
+	float prob_nearest = 0.95f;
+	float weight = 0.f;
+	if (b.learn_at_leaf == true){
+		if (merand48(b.all->random_state) < prob_nearest){
+			closest_ec = pick_nearest(b,base,cn, ec);  //location at b.examples.
+			weight = 1.f;
+		}
+		else{
+			if (b.nodes[cn].examples_index.size() > 0){
+				uint32_t pos = uint32_t(merand48(b.all->random_state) * b.nodes[cn].examples_index.size());
+				closest_ec = b.nodes[cn].examples_index[pos];
+			}
+			else
+				closest_ec = -1;
+			weight = prob_nearest/(1.-prob_nearest);	
+		}
+	}
+	else
+		closest_ec = pick_nearest(b,base,cn, ec);
+
+	float reward = 0.f;
+	if ((closest_ec != -1) && (b.examples[closest_ec]->l.multi.label == ec.l.multi.label))
+		reward = 1.f;
+	b.total_num_queires ++;
+	if (b.learn_at_leaf == true && closest_ec != -1){
+		float score = normalized_linear_prod(b, &ec, b.examples[closest_ec]);
+		example* kprod_ec = &calloc_or_throw<example>();
+		diag_kronecker_product_test(ec, *b.examples[closest_ec], *kprod_ec);
+		kprod_ec->l.simple = {reward, 1.f, -score};
+		kprod_ec->weight = weight;
+		base.learn(*kprod_ec, b.max_routers);
+		free_example(kprod_ec);
+	}
+	return reward;
+    }
+
+
     //node here the ec is already stored in the b.examples, the task here is to rout it to the leaf, 
     //and insert the ec_array_index to the leaf.
     void insert_example(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, bool fake_insert = false)
