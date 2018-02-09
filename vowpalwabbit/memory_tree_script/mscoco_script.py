@@ -7,6 +7,7 @@ leaf_example_multiplier = 20
 lr = 0.1
 bits = 30
 passes = 2
+num_passes = 2
 learn_at_leaf = 0
 task = 2
 loss_function = "squared"
@@ -27,7 +28,7 @@ if os.path.exists(train_data) is not True:
 #saved_model = "mscoco_{}.vw".format(learn_at_leaf)
 
 start = time.time()
-os.system(".././vw --memory_tree {} --learn_at_leaf {} --leaf_example_multiplier {} --task {} --train_N {} --loss_function {} -l {} -b {} {}".format(tree_node, learn_at_leaf, leaf_example_multiplier, task, train_N, loss_function, lr, bits, train_data))
+os.system(".././vw --memory_tree {} --learn_at_leaf {} --leaf_example_multiplier {} --num_passes {} --task {} --train_N {} --loss_function {} -l {} -b {} {}".format(tree_node, learn_at_leaf, leaf_example_multiplier, num_passes, task, train_N, loss_function, lr, bits, train_data))
 
 train_time = time.time() - start
 

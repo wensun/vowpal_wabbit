@@ -10,7 +10,8 @@ leaf_example_multiplier = 10
 lr = 0.1
 bits = 30
 passes = 2
-learn_at_leaf = 0
+num_passes = 2
+learn_at_leaf = 1
 task = 2
 loss_function = "squared"
 alpha = 0.1
@@ -38,8 +39,10 @@ for seed in seeds:
     saved_model = "pascal_tree_rew_{}.vw".format(learn_at_leaf)
 
     start = time.time()
-    os.system(".././vw --memory_tree {} --learn_at_leaf {} --leaf_example_multiplier {} --task {} --train_N {} --loss_function {} -l {} -b {} {}".format(
-                tree_node, learn_at_leaf, leaf_example_multiplier, task, train_N, loss_function, lr, bits, train_data))
+    os.system(".././vw --memory_tree {} --learn_at_leaf {} --leaf_example_multiplier {} --task {} --train_N {} --num_passes {} --Alpha {}\
+              --loss_function {} -l {} -b {} {}".format(
+                tree_node, learn_at_leaf, leaf_example_multiplier, task, train_N, num_passes,alpha,
+                  loss_function, lr, bits, train_data))
     train_time = time.time() - start
 
     #test:
