@@ -5,7 +5,7 @@ from IPython import embed
 
 
 available_shots = {'three':3, "one":1}
-available_shots = {'two':2}
+available_shots = {'three':3}
 
 for shot in available_shots.iterkeys():
     print "## perform experiments on {}-shot wikipara-10K ##".format(shot)
@@ -14,12 +14,13 @@ for shot in available_shots.iterkeys():
     leaf_example_multiplier = 2
     lr = 0.1
     bits = 29#30
-    passes = 3
+    passes = 4
     hal_version = 1
     num_queries = 7 #int(np.log(shots*num_of_classes)/np.log(2.))
     alpha = 0.1
-    learn_at_leaf = 0
+    learn_at_leaf = 1
     #task = 1
+    dream_repeats = 5
     loss = "squared"
 
     tree_node = int(2*passes*(num_of_classes*shots/(np.log(num_of_classes*shots)/np.log(2)*leaf_example_multiplier)));
@@ -35,8 +36,11 @@ for shot in available_shots.iterkeys():
 
     print "## Training..."
     start = time.time()
-    os.system(".././vw --memory_tree {} --learn_at_leaf {} --hal_version {} --leaf_example_multiplier {} --num_queries {} --Alpha {} -l {} -b {} -c --passes {} --loss_function {} --holdout_off {} -f {}".format(
-                tree_node, learn_at_leaf, hal_version, leaf_example_multiplier, num_queries, alpha, lr, bits, passes, loss, train_data, saved_model))
+    os.system(".././vw --memory_tree {} --learn_at_leaf {} --hal_version {} \
+        --leaf_example_multiplier {} --num_queries {} --dream_repeats {} \
+        --Alpha {} -l {} -b {} -c --passes {} --loss_function {} --holdout_off {} -f {}".format(
+                tree_node, learn_at_leaf, hal_version, leaf_example_multiplier, num_queries, 
+                dream_repeats, alpha, lr, bits, passes, loss, train_data, saved_model))
     train_time = time.time() - start
 
     #test:

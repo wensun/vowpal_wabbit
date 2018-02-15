@@ -839,7 +839,7 @@ namespace memory_tree_ns
                 float score = 0.f;
                 uint32_t loc = b.nodes[cn].examples_index[i];
 
-                if (b.learn_at_leaf == true){
+                if (b.learn_at_leaf == true && b.current_pass > 1){
                     //cout<<"learn at leaf"<<endl;
                     float tmp_s = normalized_linear_prod(b, &ec, b.examples[loc]);
                     example* kprod_ec = &calloc_or_throw<example>();
@@ -1213,13 +1213,6 @@ namespace memory_tree_ns
         //do allowed_trials number of learning.
         for (uint32_t i = 0; i < allowed_trials; i++)
             single_query_and_learn(b, base, ec_array_index, ec);
-        
-        //after learn num_queries times, we finally insert the example, if we still at the first pass
-        //if (b.current_pass == 0){
-        //    v_array<uint32_t> path_to_leaf = v_init<uint32_t>();
-		//    route_to_leaf(b, base, ec_array_index, 0, path_to_leaf, true); //insertion happens in this call.
-        //    path_to_leaf.delete_v();
-        //}
     }
 
     void insert_example_without_ips(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, bool insert)
@@ -1306,8 +1299,8 @@ namespace memory_tree_ns
             cn = newcn; 
         }
         //at leaf, use available information at leaf to train regressor/classifier at leaf.
-        if ((b.nodes[cn].internal == -1) && (b.learn_at_leaf == true))
-            learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]);
+        //if ((b.nodes[cn].internal == -1) && (b.learn_at_leaf == true))
+        //    learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]);
 
         if((b.nodes[cn].internal == -1) && (fake_insert == false)) //get to leaf:
         {   
@@ -1350,7 +1343,7 @@ namespace memory_tree_ns
             //float final_reward = insert_example_hal_helper(b, base, ec_id, 0, false, false); // learn
             //insert_example_without_ips(b, base, ec_id, true);
             
-            if (b.current_pass == 0)
+            if (b.current_pass <= 1)
             	insert_example(b, base, ec_id); //unsupervised learning
             else{
                 v_array<uint32_t> tmp_path = v_init<uint32_t>();
@@ -1380,7 +1373,7 @@ namespace memory_tree_ns
 
             clock_t begin = clock();
         
-            if (b.current_pass < 1){ //in the first pass, we need to store the memory:
+            if (b.current_pass <= 1){ //in the first pass, we need to store the memory:
                 example* new_ec = &calloc_or_throw<example>();
                 copy_example_data(new_ec, &ec);
                 remove_repeat_features_in_ec(*new_ec); ////sort unique.
@@ -1392,17 +1385,9 @@ namespace memory_tree_ns
             else{ //starting from the current pass, we just learn using reinforcement signal, no insertion needed:
                 size_t ec_id = (b.iter)%b.examples.size();
                 insert_example_hal(b, base, ec_id, *b.examples[ec_id]); //no insertion will happen in this call
-		for (uint32_t i = 0; i < b.dream_repeats; i++)
-		    experience_replay(b, base);
-            }
-            //if (b.hal_version){
-		    //    insert_example_hal(b, base, b.examples.size()-1);
-            //}
-	        //else
-		    //    insert_example(b, base, b.examples.size()-1);
-	        //}
-            
-
+		        for (uint32_t i = 0; i < b.dream_repeats; i++)
+		            experience_replay(b, base);
+                }
             b.construct_time = double(clock() - begin)/CLOCKS_PER_SEC;   
         }
         else if (b.test_mode == true){
