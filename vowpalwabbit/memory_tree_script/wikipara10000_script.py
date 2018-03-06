@@ -14,7 +14,7 @@ for shot in available_shots.iterkeys():
     leaf_example_multiplier = 2
     lr = 0.1
     bits = 29#30
-    passes = 4
+    passes = 2
     hal_version = 1
     num_queries = 7 #int(np.log(shots*num_of_classes)/np.log(2.))
     alpha = 0.1

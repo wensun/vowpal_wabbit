@@ -3,7 +3,7 @@ import time
 import numpy as np
 
 available_shots = {"five":5, "three":3}
-available_shots = {"five":5}
+available_shots = {"three":3}
 
 for key in available_shots.iterkeys():
     shots = available_shots[key]

@@ -7,16 +7,17 @@ from IPython import embed
 #for shot in available_shots.iterkeys():
 print "## perform experiments on aloi ##"
 num_of_classes = 1000
-leaf_example_multiplier = 1
+leaf_example_multiplier = 4 #8
 shots = 100
-lr = 0.1
+lr = 0.001
 bits = 29
 alpha = 0.3
-passes = 5
+passes =  3 #5
 learn_at_leaf = 1
 num_queries =  5 #int(np.log(passes*num_of_classes*shots))
 hal_version = 1
 loss = "squared"
+dream_repeats = 3
 
 tree_node = int(2*passes*(num_of_classes*shots/(np.log(num_of_classes*shots)/np.log(2)*leaf_example_multiplier)));
 
@@ -32,8 +33,8 @@ saved_model = "{}.vw".format(train_data)
 
 print "## Training..."
 start = time.time()
-os.system(".././vw --memory_tree {} --learn_at_leaf {} --hal_version {} --num_queries {} --leaf_example_multiplier {} --Alpha {} -l {} -b {} -c --passes {} --loss_function {} --holdout_off {} -f {}".format(
-                tree_node, learn_at_leaf, hal_version, num_queries, leaf_example_multiplier, alpha, lr, bits, passes, loss, train_data, saved_model))
+os.system(".././vw --memory_tree {} --learn_at_leaf {} --dream_repeats {} --hal_version {} --num_queries {} --leaf_example_multiplier {} --Alpha {} -l {} -b {} -c --passes {} --loss_function {} --holdout_off {} -f {}".format(
+                tree_node, learn_at_leaf, dream_repeats, hal_version, num_queries, leaf_example_multiplier, alpha, lr, bits, passes, loss, train_data, saved_model))
 train_time = time.time() - start
 
     #test:
