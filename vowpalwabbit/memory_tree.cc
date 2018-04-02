@@ -134,82 +134,6 @@ namespace memory_tree_ns
     }
 
 
-    //ec1 - ec2
-    void subtract_two_examples(example& ec1, example& ec2, example* subtracted_ec)
-    {
-        //copy tag from ec1 and ec2:
-        copy_array(subtracted_ec->tag, ec1.tag);
-        for (auto tag: ec2.tag)  //char
-        {
-	  size_t i = 0;
-            for(i = 0; i < subtracted_ec->tag.size(); i++){
-                if (tag == subtracted_ec->tag[i]) 
-                    break;
-            }
-            if (i == subtracted_ec->tag.size())
-                subtracted_ec->tag.push_back(tag);
-        }
-        //copy indices (different indices, no repeat)
-        copy_array(subtracted_ec->indices, ec1.indices);
-        for (auto c : ec2.indices){ //char: namespace_index
-            size_t i = 0;
-            for (i = 0; i < subtracted_ec->indices.size(); i++){
-                if (c == subtracted_ec->indices[i])
-                    break;
-            }
-            if (i == subtracted_ec->indices.size())
-                subtracted_ec->indices.push_back(c);
-        }
-        //copy features (f1 - f2) 
-        subtracted_ec->ft_offset = ec1.ft_offset; //0
-        subtracted_ec->num_features = 0;
-        subtracted_ec->total_sum_feat_sq = 0; 
-        for (auto c : subtracted_ec->indices) //namespace index:
-        {
-            //cout<<"at "<<c<<endl;
-            size_t pos1 = 0;
-            for (pos1 = 0; pos1 < ec1.indices.size(); pos1++){
-                if (c == ec1.indices[pos1])
-                    break;
-            }
-            size_t pos2 = 0;
-            for (pos2 = 0; pos2 < ec2.indices.size(); pos2++){
-                if (c == ec2.indices[pos2])
-                    break;
-            }
-
-            if ((pos1 < ec1.indices.size()) && (pos2 < ec2.indices.size())) //common name space:
-                subtract_features(ec1.feature_space[c], ec2.feature_space[c], subtracted_ec->feature_space[c]);
-            else if ((pos1 < ec1.indices.size()) && (pos2 == ec2.indices.size())) //f1 has this a name space that doesn't exist in f2:
-                subtracted_ec->feature_space[c].deep_copy_from(ec1.feature_space[c]);
-            else if ((pos1 == ec1.indices.size()) && (pos2 < ec2.indices.size())){
-                subtracted_ec->feature_space[c].deep_copy_from(ec2.feature_space[c]);
-                //negate the values
-                for (size_t t = 0; t < subtracted_ec->feature_space[c].values.size(); t++)
-                    subtracted_ec->feature_space[c].values[t] *= -1.;
-            }
-            subtracted_ec->num_features += subtracted_ec->feature_space[c].indicies.size();
-
-            //update total_feature_square
-            for (size_t v = 0; v < subtracted_ec->feature_space[c].values.size(); v++){
-                subtracted_ec->total_sum_feat_sq += pow(subtracted_ec->feature_space[c].values[v],2);
-                //cout<<pow(subtracted_ec->feature_space[c].values[v],2)<<endl;
-            }
-        }
-
-        //otherstuff:
-        subtracted_ec->partial_prediction = 0.0;
-        subtracted_ec->passthrough = nullptr;
-        subtracted_ec->loss = 0.;
-        subtracted_ec->weight = ec1.weight;
-        subtracted_ec->confidence = ec1.confidence;
-        subtracted_ec->test_only = ec1.test_only;
-        subtracted_ec->end_pass = ec1.end_pass;
-        subtracted_ec->sorted = false;
-        subtracted_ec->in_use = false;
-    }
-
-
     ////Implement kronecker_product between two examples:
     //kronecker_prod at feature level:
 
@@ -248,54 +172,6 @@ namespace memory_tree_ns
         }
     }
 
-
-    /*
-    void diag_kronecker_prod_fs(features& f1, features& f2, float& total_sum_feat_sq, float norm_sq1, float norm_sq2)
-    {
-        v_array<feature_index> tmp_f2_indicies = v_init<feature_index>();
-        copy_array(tmp_f2_indicies, f2.indicies);
-        for (size_t i1 = 0; i1 < f1.indicies.size(); i1++){
-            size_t i2 = 0;
-            for (i2 = 0; i2 < f2.indicies.size(); i2++){
-                if (f1.indicies[i1] == f2.indicies[i2]){
-                    f1.values[i1] = f1.values[i1]*f2.values[i2]/pow(norm_sq1*norm_sq2,0.5) - abs(f1.values[i1]/pow(norm_sq1,0.5) - f2.values[i2]/pow(norm_sq2,0.5));
-                    //f1.values[i1] = f1.values[i1]*f2.values[i2] / pow(norm_sq1*norm_sq2, 0.5);
-                    total_sum_feat_sq += pow(f1.values[i1],2);
-                    tmp_f2_indicies[i2] = 0;
-                    break;
-                }
-            }
-            if (i2 == f2.indicies.size()){ //f1's index does not appear in f2, namely value of the index in f2 is zero.
-                //f1.values[i1] = 0.0;
-                f1.values[i1] = 0.0 - abs(f1.values[i1]/pow(norm_sq1,0.5));
-                total_sum_feat_sq += pow(f1.values[i1],2);
-            }
-        }
-        
-        
-        for (size_t i2 = 0; i2 < tmp_f2_indicies.size(); i2++){
-            if (tmp_f2_indicies[i2] != 0){
-                float value = 0.0 - abs(f2.values[i2]/pow(norm_sq2,0.5));
-                f1.push_back(value, f2.indicies[i2]);
-                total_sum_feat_sq += pow(value, 2);
-            }
-        }
-        tmp_f2_indicies.delete_v();
-    }
-    //kronecker_prod at example level:
-    void diag_kronecker_product(example& ec1, example& ec2, example& ec)
-    {
-        //ec <= ec1 X ec2
-        copy_example_data(&ec, &ec1);
-        ec.sorted = false;
-        ec.total_sum_feat_sq = 0.0;
-        for(namespace_index c : ec.indices){
-            for(namespace_index c2 : ec2.indices){
-                if (c == c2)
-                    diag_kronecker_prod_fs(ec.feature_space[c], ec2.feature_space[c2], ec.total_sum_feat_sq, ec1.total_sum_feat_sq, ec2.total_sum_feat_sq);
-            }
-        }
-    }*/
 
     void kronecker_product_f(features& f1, features& f2, features& f, float& total_sq, size_t& num_feat, uint64_t mask, size_t ss)
     {
@@ -505,18 +381,6 @@ namespace memory_tree_ns
      return dotprod;
    }
 
-    float compute_l2_distance(memory_tree& b, example* ec1, example* ec2)
-    {
-        flat_example* fec1 = flatten_sort_example(*b.all, ec1);
-        flat_example* fec2 = flatten_sort_example(*b.all, ec2);
-        float linear_prod = linear_kernel(fec1, fec2);
-        float l2_dis = 1. + 1. - 2.*linear_prod/pow(fec1->total_sum_feat_sq*fec2->total_sum_feat_sq, 0.5);
-        fec1->fs.delete_v(); 
-        fec2->fs.delete_v();
-        free(fec1);
-        free(fec2);
-        return l2_dis;
-    }
 
     float normalized_linear_prod(memory_tree& b, example* ec1, example* ec2)
     {
@@ -1038,8 +902,9 @@ namespace memory_tree_ns
             	insert_example(b, base, ec_id); //unsupervised learning
             else{
                 v_array<uint32_t> tmp_path = v_init<uint32_t>();
-                route_to_leaf(b, base, ec_id, 0, tmp_path, true); //no learn, just re-route to adjust the position of the sampled example.
-                tmp_path.delete_v();
+                //route_to_leaf(b, base, ec_id, 0, tmp_path, true); //no learn, just re-route to adjust the position of the sampled example.
+                //tmp_path.delete_v();
+                insert_example(b, base, ec_id);
             }
             //if (b.hal_version == true){
             //    v_array<uint32_t> tmp_path = v_init<uint32_t>();
@@ -1079,7 +944,7 @@ namespace memory_tree_ns
 		        for (uint32_t i = 0; i < b.dream_repeats; i++)
 		            experience_replay(b, base);
                 }
-            b.construct_time = double(clock() - begin)/CLOCKS_PER_SEC;   
+            b.construct_time += double(clock() - begin)/CLOCKS_PER_SEC;   
         }
         else if (b.test_mode == true){
             b.iter++;
@@ -1549,4 +1414,143 @@ at iter 130000, pred error: 0.8856, baseline=-nan
     return final_reward;
   }
 
+
+      float compute_l2_distance(memory_tree& b, example* ec1, example* ec2)
+    {
+        flat_example* fec1 = flatten_sort_example(*b.all, ec1);
+        flat_example* fec2 = flatten_sort_example(*b.all, ec2);
+        float linear_prod = linear_kernel(fec1, fec2);
+        float l2_dis = 1. + 1. - 2.*linear_prod/pow(fec1->total_sum_feat_sq*fec2->total_sum_feat_sq, 0.5);
+        fec1->fs.delete_v(); 
+        fec2->fs.delete_v();
+        free(fec1);
+        free(fec2);
+        return l2_dis;
+    }
+
+
+     //ec1 - ec2
+    void subtract_two_examples(example& ec1, example& ec2, example* subtracted_ec)
+    {
+        //copy tag from ec1 and ec2:
+        copy_array(subtracted_ec->tag, ec1.tag);
+        for (auto tag: ec2.tag)  //char
+        {
+	  size_t i = 0;
+            for(i = 0; i < subtracted_ec->tag.size(); i++){
+                if (tag == subtracted_ec->tag[i]) 
+                    break;
+            }
+            if (i == subtracted_ec->tag.size())
+                subtracted_ec->tag.push_back(tag);
+        }
+        //copy indices (different indices, no repeat)
+        copy_array(subtracted_ec->indices, ec1.indices);
+        for (auto c : ec2.indices){ //char: namespace_index
+            size_t i = 0;
+            for (i = 0; i < subtracted_ec->indices.size(); i++){
+                if (c == subtracted_ec->indices[i])
+                    break;
+            }
+            if (i == subtracted_ec->indices.size())
+                subtracted_ec->indices.push_back(c);
+        }
+        //copy features (f1 - f2) 
+        subtracted_ec->ft_offset = ec1.ft_offset; //0
+        subtracted_ec->num_features = 0;
+        subtracted_ec->total_sum_feat_sq = 0; 
+        for (auto c : subtracted_ec->indices) //namespace index:
+        {
+            //cout<<"at "<<c<<endl;
+            size_t pos1 = 0;
+            for (pos1 = 0; pos1 < ec1.indices.size(); pos1++){
+                if (c == ec1.indices[pos1])
+                    break;
+            }
+            size_t pos2 = 0;
+            for (pos2 = 0; pos2 < ec2.indices.size(); pos2++){
+                if (c == ec2.indices[pos2])
+                    break;
+            }
+
+            if ((pos1 < ec1.indices.size()) && (pos2 < ec2.indices.size())) //common name space:
+                subtract_features(ec1.feature_space[c], ec2.feature_space[c], subtracted_ec->feature_space[c]);
+            else if ((pos1 < ec1.indices.size()) && (pos2 == ec2.indices.size())) //f1 has this a name space that doesn't exist in f2:
+                subtracted_ec->feature_space[c].deep_copy_from(ec1.feature_space[c]);
+            else if ((pos1 == ec1.indices.size()) && (pos2 < ec2.indices.size())){
+                subtracted_ec->feature_space[c].deep_copy_from(ec2.feature_space[c]);
+                //negate the values
+                for (size_t t = 0; t < subtracted_ec->feature_space[c].values.size(); t++)
+                    subtracted_ec->feature_space[c].values[t] *= -1.;
+            }
+            subtracted_ec->num_features += subtracted_ec->feature_space[c].indicies.size();
+
+            //update total_feature_square
+            for (size_t v = 0; v < subtracted_ec->feature_space[c].values.size(); v++){
+                subtracted_ec->total_sum_feat_sq += pow(subtracted_ec->feature_space[c].values[v],2);
+                //cout<<pow(subtracted_ec->feature_space[c].values[v],2)<<endl;
+            }
+        }
+
+        //otherstuff:
+        subtracted_ec->partial_prediction = 0.0;
+        subtracted_ec->passthrough = nullptr;
+        subtracted_ec->loss = 0.;
+        subtracted_ec->weight = ec1.weight;
+        subtracted_ec->confidence = ec1.confidence;
+        subtracted_ec->test_only = ec1.test_only;
+        subtracted_ec->end_pass = ec1.end_pass;
+        subtracted_ec->sorted = false;
+        subtracted_ec->in_use = false;
+    }
+
+
+
+       
+    void diag_kronecker_prod_fs(features& f1, features& f2, float& total_sum_feat_sq, float norm_sq1, float norm_sq2)
+    {
+        v_array<feature_index> tmp_f2_indicies = v_init<feature_index>();
+        copy_array(tmp_f2_indicies, f2.indicies);
+        for (size_t i1 = 0; i1 < f1.indicies.size(); i1++){
+            size_t i2 = 0;
+            for (i2 = 0; i2 < f2.indicies.size(); i2++){
+                if (f1.indicies[i1] == f2.indicies[i2]){
+                    f1.values[i1] = f1.values[i1]*f2.values[i2]/pow(norm_sq1*norm_sq2,0.5) - abs(f1.values[i1]/pow(norm_sq1,0.5) - f2.values[i2]/pow(norm_sq2,0.5));
+                    //f1.values[i1] = f1.values[i1]*f2.values[i2] / pow(norm_sq1*norm_sq2, 0.5);
+                    total_sum_feat_sq += pow(f1.values[i1],2);
+                    tmp_f2_indicies[i2] = 0;
+                    break;
+                }
+            }
+            if (i2 == f2.indicies.size()){ //f1's index does not appear in f2, namely value of the index in f2 is zero.
+                //f1.values[i1] = 0.0;
+                f1.values[i1] = 0.0 - abs(f1.values[i1]/pow(norm_sq1,0.5));
+                total_sum_feat_sq += pow(f1.values[i1],2);
+            }
+        }
+        
+        
+        for (size_t i2 = 0; i2 < tmp_f2_indicies.size(); i2++){
+            if (tmp_f2_indicies[i2] != 0){
+                float value = 0.0 - abs(f2.values[i2]/pow(norm_sq2,0.5));
+                f1.push_back(value, f2.indicies[i2]);
+                total_sum_feat_sq += pow(value, 2);
+            }
+        }
+        tmp_f2_indicies.delete_v();
+    }
+    //kronecker_prod at example level:
+    void diag_kronecker_product(example& ec1, example& ec2, example& ec)
+    {
+        //ec <= ec1 X ec2
+        copy_example_data(&ec, &ec1);
+        ec.sorted = false;
+        ec.total_sum_feat_sq = 0.0;
+        for(namespace_index c : ec.indices){
+            for(namespace_index c2 : ec2.indices){
+                if (c == c2)
+                    diag_kronecker_prod_fs(ec.feature_space[c], ec2.feature_space[c2], ec.total_sum_feat_sq, ec1.total_sum_feat_sq, ec2.total_sum_feat_sq);
+            }
+        }
+    }
  */
