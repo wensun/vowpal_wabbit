@@ -245,6 +245,9 @@ namespace memory_tree_xml_ns
 
         int K;
 
+        float p_at_1;
+        float p_at_3;
+        float p_at_5;
         float precision_at_K; //precision_at_K is computed by weighted averaging all memories in a leaf
         float F1_score; //f1 score is computed only using the returned memory
 
@@ -611,6 +614,32 @@ namespace memory_tree_xml_ns
 
     //whenever call this function, we need to make sure that ec's pred.multilabels has already
     //contains the top K labels.
+    inline void compute_precision_at_1_3_5(example& ec, float& p_at_1, float& p_at_3, float& p_at_5){
+        if (ec.pred.multilabels.label_v.size() >= 5)
+        {
+            uint32_t tmp_pos = 0;
+            float pk_score = 0.f;
+            p_at_1 = 0.f;
+            p_at_3 = 0.f;
+            p_at_5 = 0.f;
+            for (size_t i = 0; i < ec.pred.multilabels.label_v.size(); i++){
+                uint32_t label = ec.pred.multilabels.label_v[i];
+                if (in_v_array(ec.l.multilabels.label_v, label, tmp_pos))
+                    pk_score++;
+                
+                if (i == 0) //the first element is checked:
+                    p_at_1 = pk_score;
+                else if (i == 2) // the first three element is checked:
+                    p_at_3 = pk_score;
+                else if (i == 4)
+                    p_at_5 = pk_score;       
+            }
+            p_at_3 = p_at_3 / 3.f;
+            p_at_5 = p_at_5 / 5.f;
+        }
+        else   
+            cout<<"number of labels is less than 5..., something is wrong, check b.K"<<endl;
+    }
     inline float compute_precision_at_K(example& ec){
         float pk_score = 0;
         uint32_t tmp_pos = 0;
@@ -804,8 +833,15 @@ namespace memory_tree_xml_ns
         
         //compute precision @ K:
         copy_array(ec.pred.multilabels.label_v, top_K_labels);
-        float p_at_k = compute_precision_at_K(ec); //ec's pred has already got the top K. '
-        b.precision_at_K += p_at_k;
+        //float p_at_k = compute_precision_at_K(ec); //ec's pred has already got the top K. '
+        float p_at_1 = 0.f;
+        float p_at_3 = 0.f;
+        float p_at_5 = 0.f;
+        compute_precision_at_1_3_5(ec, p_at_1, p_at_3, p_at_5);
+        b.p_at_1 += p_at_1;
+        b.p_at_3 += p_at_3; 
+        b.p_at_5 += p_at_5;
+        //b.precision_at_K += p_at_k;
         top_K_labels.delete_v();
     }
 
@@ -858,7 +894,11 @@ namespace memory_tree_xml_ns
             predict(b, base, ec);
             if (b.iter%5000 == 0){
                 //cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
-                cout<<"at iter "<<b.iter<<", avg F1 Score: "<<b.F1_score*1./b.iter<<", avg p@"<<b.K<<": "<<b.precision_at_K/b.iter<<endl;
+                cout<<"at iter "<<b.iter<<", avg F1 Score: "<<b.F1_score*1./b.iter<<endl;
+                cout<<"at iter "<<b.iter<<", avg p@1: "<<b.p_at_1*1.f/b.iter<<endl;
+                cout<<"at iter "<<b.iter<<", avg p@3: "<<b.p_at_3*1.f/b.iter<<endl;
+                cout<<"at iter "<<b.iter<<", avg p@5: "<<b.p_at_5*1.f/b.iter<<endl;
+
             }
             clock_t begin = clock();
             if (b.current_pass < 1){
@@ -881,9 +921,13 @@ namespace memory_tree_xml_ns
         }
         else if (b.test_mode == true){
             b.iter++;
-            if (b.iter % 5000 == 0)
+            if (b.iter % 5000 == 0){
                 //cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
-                cout<<"at iter "<<b.iter<<", avg F1_score: "<<b.F1_score*1./b.iter<<", avg p@"<<b.K<<": "<<b.precision_at_K/b.iter<<endl;
+                cout<<"at iter "<<b.iter<<", avg F1 Score: "<<b.F1_score*1./b.iter<<endl;
+                cout<<"at iter "<<b.iter<<", avg p@1: "<<b.p_at_1*1.f/b.iter<<endl;
+                cout<<"at iter "<<b.iter<<", avg p@3: "<<b.p_at_3*1.f/b.iter<<endl;
+                cout<<"at iter "<<b.iter<<", avg p@5: "<<b.p_at_5*1.f/b.iter<<endl;
+            }
             clock_t begin = clock();
             predict(b, base, ec);
             b.test_time += double(clock() - begin) / CLOCKS_PER_SEC;
@@ -965,7 +1009,10 @@ namespace memory_tree_xml_ns
         b.examples.delete_v();
         cout<<b.max_nodes<<endl;
         cout<<"construct time: "<<b.construct_time<<", test time: "<<b.test_time<<endl;
-        cout<<"avg F1 score: "<<b.F1_score/(b.iter*1.)<<", avg P@ "<<b.K<<": "<<b.precision_at_K/b.iter<<endl;
+        cout<<"Final avg F1 Score: "<<b.F1_score*1./b.iter<<endl;
+        cout<<"Final avg p@1: "<<b.p_at_1*1.f/b.iter<<endl;
+        cout<<"Final avg p@3: "<<b.p_at_3*1.f/b.iter<<endl;
+        cout<<"Final avg p@5: "<<b.p_at_5*1.f/b.iter<<endl;
     }
 
     ///////////////////Save & Load//////////////////////////////////////
@@ -1140,7 +1187,7 @@ base_learner* memory_tree_xml_setup(vw& all)
       ("learn_at_leaf", po::value<bool>()->default_value(true), "whether or not learn at leaf (defualt = True)")
       ("num_queries", po::value<uint32_t>()->default_value(1.), "number of returned queries per example (<= log nodes")
       ("dream_repeats", po::value<uint32_t>()->default_value(1.), "number of dream operations per example (default = 1)")
-      ("Precision_at_K", po::value<int>()->default_value(1), "Precision@K (defualt K = 1)")
+      ("Precision_at_K", po::value<int>()->default_value(5), "Precision@K (defualt K = 1)")
       ("Alpha", po::value<float>()->default_value(0.1), "Alpha");
      add_options(all);
 
