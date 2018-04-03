@@ -3,23 +3,23 @@ import time
 import numpy as np
 from IPython import embed
 
-print "perform experiments on rcv1x (multilabel)"
+print "perform experiments on WikiLSHTC (multilabel)"
 leaf_example_multiplier = 4
 lr = 0.1
 bits = 28
 alpha = 0.3
 passes = 4
-learn_at_leaf = 0
+learn_at_leaf = 1
 num_queries = 1  #does not really use
 hal_version = 1 #does not really use
 loss = "squared"
 dream_repeats = 3
 Precision_at_K = 5
 
-num_examples = 630000
+num_examples = 1778351
 tree_node = int(num_examples/(np.log(num_examples)/np.log(2)*leaf_example_multiplier))
-train_data = "rcv1x_train.mat.mult_label.vw.txt"
-test_data = "rcv1x_test.mat.mult_label.vw.txt"
+train_data = "wikiLSHTC_train.mat.mult_label.vw.txt"
+test_data = "wikiLSHTC_test.mat.mult_label.vw.txt"
 if os.path.exists(train_data) is not True:
         os.system("wget http://kalman.ml.cmu.edu/wen_datasets/{}".format(train_data))
 if os.path.exists(test_data) is not True:

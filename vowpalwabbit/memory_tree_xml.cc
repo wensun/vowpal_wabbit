@@ -440,7 +440,9 @@ namespace memory_tree_xml_ns
         float weighted_value = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr*1.)/log(2.)+b.alpha*prediction;
         float route_label = weighted_value < 0.f ? -1.f : 1.f;
         
-        ec.l.simple = {route_label, abs(weighted_value), 0.f};
+	float ec_input_weight = ec.weight;
+	ec.weight = abs(weighted_value);
+        ec.l.simple = {route_label, 1., 0.f};
         base.learn(ec, b.nodes[cn].base_router); //update the router according to the new example.
         
         base.predict(ec, b.nodes[cn].base_router);
@@ -449,6 +451,7 @@ namespace memory_tree_xml_ns
 
         ec.pred.multilabels = preds;
         ec.l.multilabels = multilabels;
+	ec.weight = ec_input_weight;
         return save_binary_scalar;
     }
 
@@ -615,7 +618,7 @@ namespace memory_tree_xml_ns
     //whenever call this function, we need to make sure that ec's pred.multilabels has already
     //contains the top K labels.
     inline void compute_precision_at_1_3_5(example& ec, float& p_at_1, float& p_at_3, float& p_at_5){
-        if (ec.pred.multilabels.label_v.size() >= 5)
+        if (ec.pred.multilabels.label_v.size() > 0)
         {
             uint32_t tmp_pos = 0;
             float pk_score = 0.f;
@@ -637,8 +640,8 @@ namespace memory_tree_xml_ns
             p_at_3 = p_at_3 / 3.f;
             p_at_5 = p_at_5 / 5.f;
         }
-        else   
-            cout<<"number of labels is less than 5..., something is wrong, check b.K"<<endl;
+        //else   
+        //    cout<<"number of labels is less than 5..., something is wrong, check b.K"<<endl;
     }
     inline float compute_precision_at_K(example& ec){
         float pk_score = 0;
@@ -664,12 +667,13 @@ namespace memory_tree_xml_ns
     //we use F1 score as the reward signal 
     float F1_score_for_two_examples(example& ec1, example& ec2){
         float num_overlaps = get_overlap_from_two_examples(ec1, ec2);
-        float v1 = num_overlaps/(1e-7+ec1.l.multilabels.label_v.size()*1.);
+	//float v1 = num_overlaps/(1e-7+ec1.l.multilabels.label_v.size()*1.);
         float v2 = num_overlaps/(1e-7+ec2.l.multilabels.label_v.size()*1.);
         if (num_overlaps == 0.f)
             return 0.f;
         else
-            return 2.*(v1*v2/(v1+v2));
+	    return v2; //only precision
+            //return 2.*(v1*v2/(v1+v2));
     }
 
     void learn_at_leaf_random(memory_tree& b, base_learner& base, const uint32_t& leaf_id, example& ec, const float& weight)
@@ -774,18 +778,18 @@ namespace memory_tree_xml_ns
                 MULTILABEL::labels multilabels = ec.l.multilabels;
                 MULTILABEL::labels preds = ec.pred.multilabels;
                 //MULTICLASS::label_t mc = ec.l.multi;
-                ec.weight = fabs(objective);
-                if (ec.weight >= 100.f) //crop the weight, otherwise sometimes cause NAN outputs.
-                    ec.weight = 100.f;
-                else if (ec.weight < .001f)
-                    ec.weight = 0.001f;
+                ec.weight = 1.f; //fabs(objective);
+                if (ec.weight >= 10.f) //crop the weight, otherwise sometimes cause NAN outputs.
+                    ec.weight = 10.f;
+                else if (ec.weight < .01f)
+                    ec.weight = 0.01f;
                 ec.l.simple = {objective < 0. ? -1.f : 1.f, 1.f, 0.};
                 base.learn(ec, b.nodes[cn].base_router);
                 ec.pred.multilabels = preds;
                 ec.l.multilabels = multilabels;
                 ec.weight = ec_input_weight; //restore the original weight
             }
-            else{ //if it's a leaf node:
+            else if (b.learn_at_leaf == true){ //if it's a leaf node:
                 float weight = 1.f; //float(path_to_leaf.size());
                 learn_at_leaf_random(b, base, cn, ec, weight); //randomly sample one example, query reward, and update leaf learner
             }
@@ -892,7 +896,7 @@ namespace memory_tree_xml_ns
             b.iter++;
 
             predict(b, base, ec);
-            if (b.iter%5000 == 0){
+            if (b.iter%10000 == 0){
                 //cout<<"at iter "<<b.iter<<", pred error: "<<b.num_mistakes*1./b.iter<<endl;
                 cout<<"at iter "<<b.iter<<", avg F1 Score: "<<b.F1_score*1./b.iter<<endl;
                 cout<<"at iter "<<b.iter<<", avg p@1: "<<b.p_at_1*1.f/b.iter<<endl;

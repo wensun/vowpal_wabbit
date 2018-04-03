@@ -8,13 +8,13 @@ leaf_example_multiplier = 4
 lr = 0.1
 bits = 28
 alpha = 0.3
-passes = 5
-learn_at_leaf = 1
+passes = 4
+learn_at_leaf = 0
 num_queries = 1  #does not really use
 hal_version = 1 #does not really use
 loss = "squared"
 dream_repeats = 3
-Precision_at_K = 3
+Precision_at_K = 5
 
 num_examples = 14146
 tree_node = int(num_examples/(np.log(num_examples)/np.log(2)*leaf_example_multiplier))
