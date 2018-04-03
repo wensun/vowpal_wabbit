@@ -778,7 +778,8 @@ namespace memory_tree_xml_ns
                 MULTILABEL::labels multilabels = ec.l.multilabels;
                 MULTILABEL::labels preds = ec.pred.multilabels;
                 //MULTICLASS::label_t mc = ec.l.multi;
-                ec.weight = 1.f; //fabs(objective);
+                //ec.weight = 1.f; //fabs(objective);
+		ec.weight = fabs(objective);
                 if (ec.weight >= 10.f) //crop the weight, otherwise sometimes cause NAN outputs.
                     ec.weight = 10.f;
                 else if (ec.weight < .01f)
@@ -799,7 +800,8 @@ namespace memory_tree_xml_ns
 
     void insert_example_hal(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, example& ec)
     {
-        single_query_and_learn(b, base, ec_array_index, ec);
+	//for(size_t i = 0; i < 3; i++)
+       	single_query_and_learn(b, base, ec_array_index, ec);
     }
 
     void predict(memory_tree& b, base_learner& base, example& ec)

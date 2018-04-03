@@ -4,7 +4,7 @@ import numpy as np
 from IPython import embed
 
 print "perform experiments on rcv1x (multilabel)"
-leaf_example_multiplier = 4
+leaf_example_multiplier = 2
 lr = 0.1
 bits = 28
 alpha = 0.3

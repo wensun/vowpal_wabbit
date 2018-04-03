@@ -3,12 +3,12 @@ import time
 import numpy as np
 from IPython import embed
 
-print "perform experiments on amazoncat 13K (multilabel)"
-leaf_example_multiplier = 4
-lr = 0.1
-bits = 28
-alpha = 0.3
-passes = 3
+print "perform experiments on rcv1x (multilabel)"
+leaf_example_multiplier = 2
+lr = 1
+bits = 30
+alpha = 0.1
+passes = 4
 learn_at_leaf = 0
 num_queries = 1  #does not really use
 hal_version = 1 #does not really use
@@ -16,11 +16,10 @@ loss = "squared"
 dream_repeats = 3
 Precision_at_K = 5
 
-num_examples = 1186239
+num_examples = 15539
 tree_node = int(num_examples/(np.log(num_examples)/np.log(2)*leaf_example_multiplier))
-train_data = "amazoncat_train.mat.mult_label.vw.txt"
-test_data =  "amazoncat_test.mat.mult_label.vw.txt"
-
+train_data = "eurlex_train.mat.mult_label.vw.txt"
+test_data = "eurlex_test.mat.mult_label.vw.txt"
 if os.path.exists(train_data) is not True:
         os.system("wget http://kalman.ml.cmu.edu/wen_datasets/{}".format(train_data))
 if os.path.exists(test_data) is not True:
