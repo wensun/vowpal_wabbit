@@ -980,8 +980,9 @@ namespace memory_tree_xml_ns
 
         //caculate precision at top K:
         v_array<uint32_t> top_K_labels = v_init<uint32_t>();
-        if (b.oas == false)
+        if (b.oas == false){
             compute_scores_labels(b, base, cn, ec, b.K, top_K_labels);
+	}
         else
             compute_scores_and_labels_via_oas(b,base,cn,ec, b.K, top_K_labels);
 
@@ -1014,7 +1015,7 @@ namespace memory_tree_xml_ns
             cn = newcn; 
         }
 
-        train_one_against_some_at_leaf(b, base, cn, *b.examples[ec_array_index]);
+	train_one_against_some_at_leaf(b, base, cn, *b.examples[ec_array_index]);
         
         //insert the example in leaf and deal with split:
         if((b.nodes[cn].internal == -1) && (fake_insert == false)) //get to leaf:
