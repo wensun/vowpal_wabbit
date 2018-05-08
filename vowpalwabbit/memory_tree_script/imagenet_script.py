@@ -3,7 +3,7 @@ import time
 import numpy as np
 
 available_shots = {"five":5, "three":3}
-available_shots = {"three":3}
+available_shots = {"five":5}
 
 for key in available_shots.iterkeys():
     shots = available_shots[key]
@@ -13,9 +13,11 @@ for key in available_shots.iterkeys():
     bits = 30
     passes = 2
     learn_at_leaf = 1 # 0
+    use_oas = 0
+    dream_at_update = 1
     hal_version = 1
-    bandit = 1
-    top_K = 1
+    #bandit = 1
+    #top_K = 1
     dream_repeats = 3
     num_queries = 1
     alpha = 0.1
@@ -34,11 +36,13 @@ for key in available_shots.iterkeys():
 
     print "## Training.."
     start = time.time()
-    os.system(".././vw --memory_tree {} --learn_at_leaf {} --hal_version {} --bandit {} --top_K {}\
+    os.system(".././vw --memory_tree {} --learn_at_leaf {} --max_number_of_labels {} --hal_version {}\
+              --oas {} --dream_at_update {} \
               --leaf_example_multiplier {} --dream_repeats {} --num_queries {}\
               --Alpha {} --loss_function {}  -l {} -b {} -c --passes {} \
               --holdout_off {} -f {}".format(
-                tree_node, learn_at_leaf, hal_version, bandit, top_K,
+                tree_node, learn_at_leaf, num_of_classes, hal_version,
+                use_oas, dream_at_update, 
                   leaf_example_multiplier, dream_repeats, num_queries,
                   alpha, loss, lr, bits, passes,
                   train_data, saved_model))

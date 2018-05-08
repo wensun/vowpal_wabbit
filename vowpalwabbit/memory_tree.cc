@@ -747,10 +747,10 @@ namespace memory_tree_ns
 
     void predict(memory_tree& b, base_learner& base, example& test_ec)
     {
-        //example& ec = calloc_or_throw<example>();
-        //copy_example_data(&ec, &test_ec);
-        //remove_repeat_features_in_ec(ec);
-        example& ec = test_ec;
+        example& ec = calloc_or_throw<example>();
+        copy_example_data(&ec, &test_ec);
+        remove_repeat_features_in_ec(ec);
+	//example& ec = test_ec;
         
 
         MULTICLASS::label_t mc = ec.l.multi;
@@ -1007,7 +1007,7 @@ namespace memory_tree_ns
             if (b.current_pass < 1){ //in the first pass, we need to store the memory:
                 example* new_ec = &calloc_or_throw<example>();
                 copy_example_data(new_ec, &ec);
-                //remove_repeat_features_in_ec(*new_ec); ////sort unique.
+                remove_repeat_features_in_ec(*new_ec); ////sort unique.
                 b.examples.push_back(new_ec);   
                 insert_example(b, base, b.examples.size() - 1); //unsupervised learning. 
                 for (uint32_t i = 0; i < b.dream_repeats; i++)

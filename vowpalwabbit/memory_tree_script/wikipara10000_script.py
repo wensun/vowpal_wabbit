@@ -11,15 +11,16 @@ for shot in available_shots.iterkeys():
     print "## perform experiments on {}-shot wikipara-10K ##".format(shot)
     shots = available_shots[shot]
     num_of_classes = 10000
-    leaf_example_multiplier = 2
+    leaf_example_multiplier = 4 #2
     lr = 0.1
     bits = 29#30
-    passes = 2
+    passes =1# 2
     hal_version = 1
-    num_queries = 7 #int(np.log(shots*num_of_classes)/np.log(2.))
+    num_queries = 1 #int(np.log(shots*num_of_classes)/np.log(2.))
     alpha = 0.1
     learn_at_leaf = 1
-    #task = 1
+    use_oas = 0
+    dream_at_update = 1
     dream_repeats = 5
     loss = "squared"
 
@@ -36,11 +37,11 @@ for shot in available_shots.iterkeys():
 
     print "## Training..."
     start = time.time()
-    os.system(".././vw --memory_tree {} --learn_at_leaf {} --hal_version {} \
-        --leaf_example_multiplier {} --num_queries {} --dream_repeats {} \
+    os.system(".././vw --memory_tree {} --learn_at_leaf {} --max_number_of_labels {} --hal_version {} --oas {} --dream_at_update {}\
+              --leaf_example_multiplier {} --num_queries {} --dream_repeats {} \
         --Alpha {} -l {} -b {} -c --passes {} --loss_function {} --holdout_off {} -f {}".format(
-                tree_node, learn_at_leaf, hal_version, leaf_example_multiplier, num_queries, 
-                dream_repeats, alpha, lr, bits, passes, loss, train_data, saved_model))
+                tree_node, learn_at_leaf, num_of_classes, hal_version, use_oas, dream_at_update, 
+                leaf_example_multiplier, num_queries, dream_repeats, alpha, lr, bits, passes, loss, train_data, saved_model))
     train_time = time.time() - start
 
     #test:
