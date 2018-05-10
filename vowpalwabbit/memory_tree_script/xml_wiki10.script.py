@@ -4,15 +4,16 @@ import numpy as np
 from IPython import embed
 
 print "perform experiments on wiki10 (multilabel)"
-leaf_example_multiplier = 2
+leaf_example_multiplier = 2  #2
 lr = 0.1
-bits = 28
-alpha = 0.3
-passes = 4
-learn_at_leaf = 0
+bits = 30
+alpha = 0.1 #0.3
+passes = 4 #4
+learn_at_leaf = 1
 num_queries = 1  #does not really use
 hal_version = 1 #does not really use
-use_oas = 1
+use_oas = 0
+dream_at_update = 1 #0 #1
 loss = "squared"
 dream_repeats = 3
 Precision_at_K = 5
@@ -33,11 +34,11 @@ saved_model = "{}.vw".format(train_data)
 print "## Training..."
 start = time.time()
 #train_data = 'tmp_rcv1x.vw.txt'
-os.system(".././vw --memory_tree_xml {} --learn_at_leaf {} \
+os.system(".././vw --memory_tree_xml {} --learn_at_leaf {} --dream_at_update {}\
                 --max_number_of_labels {} --dream_repeats {} \
                 --Precision_at_K {} --hal_version {} --oas {} \
                 --num_queries {} --leaf_example_multiplier {} --Alpha {} -l {} -b {} -c --passes {} --loss_function {} --holdout_off {} -f {}".format(
-                tree_node, learn_at_leaf, 
+                tree_node, learn_at_leaf,dream_at_update,
                 max_num_labels, dream_repeats, 
                 Precision_at_K, hal_version, use_oas, 
                 num_queries, leaf_example_multiplier, 
