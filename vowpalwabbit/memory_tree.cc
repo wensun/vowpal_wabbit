@@ -390,6 +390,7 @@ namespace memory_tree_ns
         float test_time;
 
 	int num_passes;
+	bool dream_at_update;
 
         memory_tree()
         {
@@ -543,7 +544,8 @@ namespace memory_tree_ns
         float route_label = weighted_value < 0.f ? -1.f : 1.f;
         
         imp_weight = abs(weighted_value);
-        ec.l.simple = {route_label, imp_weight, 0.f};
+        ec.l.simple = {route_label, 1.f, 0.f};
+	ec.weight = 1.f;
         base.learn(ec, b.nodes[cn].base_router); //update the router according to the new example.
         
         base.predict(ec, b.nodes[cn].base_router);
@@ -704,20 +706,44 @@ namespace memory_tree_ns
         return reward;
     }
 
+    void learn_at_leaf_random(memory_tree& b, base_learner& base, const uint32_t& leaf_id, example& ec)
+    {
+	    b.total_num_queires++;
+	    int32_t ec_id = -1;
+	    float reward = 0.f;
+	    if (b.nodes[leaf_id].examples_index.size() > 0){
+	    	uint32_t pos = uint32_t(merand48(b.all->random_state) * b.nodes[leaf_id].examples_index.size());
+		ec_id = b.nodes[leaf_id].examples_index[pos];
+	    }
+	    if (ec_id != -1){
+		float score = normalized_linear_prod(b, &ec, b.examples[ec_id]);
+	    	reward = get_reward(b, ec, *b.examples[ec_id]);
+		example* kprod_ec = &calloc_or_throw<example>();
+		diag_kronecker_product_test(ec, *b.examples[ec_id], *kprod_ec, b.task_id);
+		kprod_ec->l.simple = {reward, 1.f, -score};
+		kprod_ec->weight = 1.f;
+		base.learn(*kprod_ec, b.max_routers);
+		free_example(kprod_ec);
+	    }
+	    return;
+    }
 
+
+    
     void learn_similarity_at_leaf(memory_tree& b, base_learner& base, const uint32_t cn, example& ec)
     {
         for (uint32_t loc : b.nodes[cn].examples_index)
         {
             example* ec_loc = b.examples[loc];
-            float score = normalized_linear_prod(b, &ec, ec_loc);
+            float score = normalized_linear_prod(b, &ec, ec_loc); //it split out captions.
             //score = 0.;
             float reward = get_reward(b, ec, *ec_loc);   //reward from 0-1
             example* kprod_ec = &calloc_or_throw<example>();
-            diag_kronecker_product_test(ec, *ec_loc, *kprod_ec, b.task_id);
+            diag_kronecker_product_test(ec, *ec_loc, *kprod_ec, b.task_id); //it splits out captions.
      
             float label = ((reward - 0.5f) > 0.f ? 1:-1);
-            kprod_ec->l.simple = {label, abs(reward-0.5f), -score};
+            kprod_ec->l.simple = {label, 1.f, -score};
+	    //kprod_ec->l.simple = {reward, 1.f, -score};
 	    //kprod_ec->l.simple = {reward-0.5, 1., -score};
             //kprod_ec->l.simple = {label, 1., 0.*(score-0.5)}; //do regression on reward. 
             //kprod_ec->l.simple = {label, 1., -score};
@@ -731,6 +757,7 @@ namespace memory_tree_ns
             free_example(kprod_ec);
         }
     }
+    
 
     void predict(memory_tree& b, base_learner& base, example& test_ec)
     {
@@ -765,6 +792,7 @@ namespace memory_tree_ns
             test_ec.loss = -reward * test_ec.weight;
             b.total_reward += reward;
 
+	    /*
 	    if (b.iter <= b.train_N && b.learn_at_leaf == true){
 	    	float score = normalized_linear_prod(b, &ec, b.examples[closest_ec]); //for Q&A task, score is from the inner produce of namespace Q.
 		example* kprod_ec = &calloc_or_throw<example>();
@@ -774,7 +802,7 @@ namespace memory_tree_ns
 		kprod_ec->weight = abs(reward - 0.5f);
 		base.learn(*kprod_ec, b.max_routers);
 		free_example(kprod_ec);
-	    }
+	    }*/
 		
             if (b.iter > b.train_N)
                 b.total_test_reward += reward;
@@ -804,37 +832,24 @@ namespace memory_tree_ns
 		cn = prediction < 0 ? b.nodes[cn].left : b.nodes[cn].right;
 	}
 	int64_t closest_ec = 0;
-	float prob_nearest = 1.f; //0.95f;
-	float weight = 0.f;
-	if (b.learn_at_leaf == true){
-		if (merand48(b.all->random_state) < prob_nearest){
-			closest_ec = pick_nearest(b,base,cn, ec);  //location at b.examples.
-			weight = 1.f;
-		}
-		else{
-			if (b.nodes[cn].examples_index.size() > 0){
-				uint32_t pos = uint32_t(merand48(b.all->random_state) * b.nodes[cn].examples_index.size());
-				closest_ec = b.nodes[cn].examples_index[pos];
-			}
-			else
-				closest_ec = -1;
-			weight = prob_nearest/(1.-prob_nearest);	
-		}
-	}
-	else
-		closest_ec = pick_nearest(b,base,cn, ec);
+	closest_ec = pick_nearest(b,base,cn, ec);  //location at b.examples.
 
 	float reward = 0.f;
-	reward = get_reward(b, test_ec, *b.examples[closest_ec]);//use test_ec here, as querying reward uses features in namespace A.
-
+	if (closest_ec != -1)
+		reward = get_reward(b, test_ec, *b.examples[closest_ec]);//use test_ec here, as querying reward uses features in namespace A.
 	b.total_num_queires ++;
+	free_example(&ec);
+	
+	if (b.learn_at_leaf == true && closest_ec != -1)
+		learn_similarity_at_leaf(b, base, cn, test_ec);
 	/*
 	if (b.learn_at_leaf == true && closest_ec != -1){
-		float score = normalized_linear_prod(b, &ec, b.examples[closest_ec]);
+		float score = normalized_linear_prod(b, &test_ec, b.examples[closest_ec]); //it will split out captions features.
+		//score = 0;
 		example* kprod_ec = &calloc_or_throw<example>();
-		diag_kronecker_product_test(ec, *b.examples[closest_ec], *kprod_ec);
-		kprod_ec->l.simple = {reward-0.5f < 0? -1.f:1.f, 1.f, -score};
-		kprod_ec->weight = weight*abs(reward - 0.5f);
+		diag_kronecker_product_test(test_ec, *b.examples[closest_ec], *kprod_ec, b.task_id);
+		kprod_ec->l.simple = {reward, 1.f, -score};
+		kprod_ec->weight = 1.f; //weight*abs(reward - 0.5f);
 		base.learn(*kprod_ec, b.max_routers);
 		free_example(kprod_ec);
 	}*/
@@ -863,6 +878,7 @@ namespace memory_tree_ns
 			cn = descent(b.nodes[cn], prediction);
 	}
 	path.push_back(cn);
+
 	if (insertion == true){
 		b.nodes[cn].examples_index.push_back(ec_array_index);
 		if ((b.nodes[cn].examples_index.size() >= b.max_leaf_examples) && (b.nodes.size() + 2 < b.max_nodes))
@@ -870,49 +886,56 @@ namespace memory_tree_ns
 	}
     }
 
-    void single_query_and_learn(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, example& ec){
+    void single_query_and_learn(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, example& test_ec){
     	//ec contains Q and A
     	v_array<uint32_t> path_to_leaf = v_init<uint32_t>();
 	route_to_leaf(b, base, ec_array_index, 0, path_to_leaf, false);
 	if (path_to_leaf.size() > 1){
-		uint32_t random_pos = merand48(b.all->random_state)*(path_to_leaf.size()-1);
+		uint32_t random_pos = merand48(b.all->random_state)*(path_to_leaf.size());
 		uint32_t cn = path_to_leaf[random_pos];
-		float objective = 0.f;
-		if (b.bandit == true){
+		if (b.nodes[cn].internal != -1){
+			float objective = 0.f;
 			float prob_right = 0.5;
 			float coin = merand48(b.all->random_state) < prob_right ? 1.f : -1.f;
 			if (coin == -1.f){ //go left
-				float reward_left_subtree = return_reward_from_node(b,base, b.nodes[cn].left, ec);
+				float reward_left_subtree = return_reward_from_node(b,base, b.nodes[cn].left, test_ec);
 				objective = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha*(-reward_left_subtree/(1.-prob_right))/2.;
 			}
 			else{
-				float reward_right_subtree= return_reward_from_node(b,base, b.nodes[cn].right, ec);
+				float reward_right_subtree= return_reward_from_node(b,base, b.nodes[cn].right, test_ec);
 				objective = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha*(reward_right_subtree/prob_right)/2.;
 			}
+			example& ec = calloc_or_throw<example>(); //extract Q (caption feature) from test_ec
+			if (b.task_id == 1)
+				copy_example_data(&ec, &test_ec);
+			else if (b.task_id != 1){
+				copy_example_data(&ec, &test_ec, true);
+				ec.indices.push_back(b.Q); //ec contains captions of images
+				ec.feature_space[b.Q].deep_copy_from(test_ec.feature_space[b.Q]); //use joints.
+			}
+			ec.weight = fabs(objective);
+			if (ec.weight >= 100.f)
+				ec.weight = 100.f;
+			else if (ec.weight < 0.01)
+				ec.weight = 0.01f;
+			//ec.weight=1.f;
+			ec.l.simple = {objective < 0. ? -1.f : 1.f, 1.f, 0.};
+			base.learn(ec, b.nodes[cn].base_router); //ec only contains caption features.
+			free_example(&ec);
 		}
 		else{
-			float reward_left_subtree = return_reward_from_node(b,base, b.nodes[cn].left, ec);
-			float reward_right_subtree= return_reward_from_node(b,base, b.nodes[cn].right, ec);
-			objective = (1.-b.alpha)*log(b.nodes[cn].nl/b.nodes[cn].nr) + b.alpha*(reward_right_subtree-reward_left_subtree);
+			if(b.learn_at_leaf == true)
+				//learn_at_leaf_random(b, base, cn, test_ec);
+				learn_similarity_at_leaf(b, base, cn, test_ec);
 		}
-		float ec_input_weight = ec.weight;
-		ec.weight = fabs(objective);
-		ec.l.simple = {objective < 0. ? -1.f : 1.f, 1.f, 0.};
-		base.learn(ec, b.nodes[cn].base_router);
-		ec.weight = ec_input_weight;
 	}
 	path_to_leaf.delete_v();
     }
 
-    void multiple_query_learn_and_final_insert(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, example& ec){
-    	uint32_t allowed_trials = 1;
-	for (uint32_t i = 0; i < allowed_trials; i++)
-		single_query_and_learn(b, base, ec_array_index, ec);
-    }
-
     void insert_example_hal(memory_tree& b, base_learner& base, const uint32_t& ec_array_index, example& ec) {
 	//here ec contains both Q and A.
-    	multiple_query_learn_and_final_insert(b, base, ec_array_index, ec);
+    	//multiple_query_learn_and_final_insert(b, base, ec_array_index, ec);
+	single_query_and_learn(b, base, ec_array_index, ec);
     }
 
 
@@ -930,7 +953,8 @@ namespace memory_tree_ns
         }
         //at leaf, use available information at leaf to train regressor/classifier at leaf.
         if ((b.nodes[cn].internal == -1) && (b.learn_at_leaf == true))
-            learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]);
+	     //learn_at_leaf_random(b, base, cn, *b.examples[ec_array_index]);
+             learn_similarity_at_leaf(b, base, cn, *b.examples[ec_array_index]);
 
         if((b.nodes[cn].internal == -1) && (fake_insert == false)) //get to leaf:
         {   
@@ -952,19 +976,18 @@ namespace memory_tree_ns
     void experience_replay(memory_tree& b, base_learner& base)
     {
         uint32_t cn = 0; //start from root, randomly descent down! 
-        //int loc_at_leaf = random_sample_example_pop(b, cn);
         uint32_t ec_id = random_sample_example_pop(b,cn);
-        //if (loc_at_leaf >= 0){
         if (ec_id >= 0){
-            //uint32_t ec_id = b.nodes[cn].examples_index[loc_at_leaf]; //ec_id is the postion of the sampled example in b.examples. 
-            //re-insert:note that we do not have to 
-            //restore the example into b.examples, as it's alreay there
 	    if (b.iter < b.train_N)
             	insert_example(b, base, ec_id); 
 	    else if (b.iter == b.train_N){
-	    	v_array<uint32_t> tmp_path = v_init<uint32_t>();
-		route_to_leaf(b, base, ec_id, 0, tmp_path, true);
-		tmp_path.delete_v();
+		if (b.dream_at_update == false){
+	    		v_array<uint32_t> tmp_path = v_init<uint32_t>();
+			route_to_leaf(b, base, ec_id, 0, tmp_path, true);
+			tmp_path.delete_v();
+		}
+		else
+			insert_example(b, base, ec_id);
 	    }
         }
 
@@ -993,7 +1016,7 @@ namespace memory_tree_ns
             b.num_ecs++; 
 
             insert_example(b, base, b.examples.size()-1);
-            for (int i = 0; i < 1; i++)
+            for (uint32_t i = 0; i < b.dream_repeats; i++)
                 experience_replay(b, base);   
             clock_t end = clock();
             double elapsed_secs = double(end - begin) / CLOCKS_PER_SEC;
@@ -1010,7 +1033,7 @@ namespace memory_tree_ns
 					cout<<"at iter "<<b.iter+pass*b.examples.size() + ec_id<<", average reward: "<<b.total_reward*1./(b.iter+ec_id+pass*b.examples.size())<<", total number of reward queries: "<<b.total_num_queires<<endl;
 				insert_example_hal(b, base, ec_id, *b.examples[ec_id]);
 
-				for(int i = 0; i < 1; i++)
+				for(uint32_t i = 0; i < b.dream_repeats; i++)
 					experience_replay(b, base);
 			}
 		}
@@ -1211,6 +1234,7 @@ base_learner* memory_tree_setup(vw& all)
       ("task", po::value<uint32_t>()->default_value(1.), "task: 1:multiclass; 2: Robot Configuration; 3:Q&A with bleu as reward")
       ("train_N", po::value<size_t>()->default_value(1000), "num of training examples")
       ("dream_repeats", po::value<uint32_t>()->default_value(1.), "number of dream operations per example (default = 1)")
+      ("dream_at_update", po::value<bool>()->default_value(false), "turn on dream operations at reward based update as well")
       ("num_passes", po::value<int>()-> default_value(1), "number of passes (note this is different from vw's passes parameter)")
       ("Alpha", po::value<float>()->default_value(0.1), "Alpha");
      add_options(all);
@@ -1241,6 +1265,10 @@ base_learner* memory_tree_setup(vw& all)
     {
         tree.task_id = vm["task"].as<uint32_t>();
         *all.file_options << " --task "<< vm["task"].as<uint32_t>();
+    }
+    if (vm.count("dream_at_update")){
+    	tree.dream_at_update = vm["dream_at_update"].as<bool>();
+	*all.file_options << " --dream_at_update "<<vm["dream_at_update"].as<bool>();
     }
     if (vm.count("train_N"))
     {
